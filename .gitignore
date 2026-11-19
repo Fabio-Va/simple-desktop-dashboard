@@ -1,0 +1,10 @@
+.build/
+build/
+dist/
+__pycache__/
+*.pyc
+*.spec
+SiDD.exe
+Dashboard.exe
+config.local.json
+HANDOFF.md

@@ -1,0 +1,26 @@
+{
+  "_comment": "Copy this file to config.local.json (next to SiDD.exe) to add your own built-in apps. config.local.json is ignored by git. A preset opens a file/program ('path') or shows a small menu of choices ('choices'); 'check' is an optional path that must exist for a choice to be enabled.",
+  "presets": {
+    "handbook": {
+      "name": "Handbook",
+      "color": "#C89B3C",
+      "glyph": "HB",
+      "path": "~\\Documents\\handbook.html"
+    },
+    "browsers": {
+      "name": "Browsers",
+      "color": "#0A1428",
+      "ink": "#FFFFFF",
+      "glyph": "B",
+      "tip": "Open a browser profile",
+      "choices": [
+        {"label": "1", "tip": "Work", "path": "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe", "args": ["--profile-directory=Default"]},
+        {"label": "2", "tip": "Personal", "path": "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe", "args": ["--profile-directory=Profile 1"]}
+      ]
+    }
+  },
+  "preset_defaults": {
+    "handbook": true,
+    "browsers": false
+  }
+}
