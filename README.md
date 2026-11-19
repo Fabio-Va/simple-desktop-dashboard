@@ -103,7 +103,21 @@ A preset has either a `path` (file, program or link) or a list of `choices`: eac
 | `config.example.json` | example of personal built-in apps |
 | `icon.ico` | app icon |
 
+## Make it your own
+
+SiDD is MIT-licensed: fork it, change it (by hand or with your favourite AI coding assistant) and build it with `build.bat`.
+Almost everything lives in `sidd.py`, with comments.
+
+Builds you make yourself **do not update automatically**, so an official release can never overwrite your changes.
+To ship updates for your own fork, add your repository to `config.local.json` next to `SiDD.exe`:
+
+```json
+{ "update_repo": "your-name/your-fork" }
+```
+
 ## Releasing an update
+
+Official builds get their update source from `official.py` (one line, `UPDATE_REPO = "owner/repo"`), which is not in git and exists only on the maintainer's PC.
 
 1. Raise `APP_VERSION` in `sidd.py` and run `build.bat`.
 2. Publish a GitHub release whose tag is the version and attach `SiDD.exe`:

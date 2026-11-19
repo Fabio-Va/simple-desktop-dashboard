@@ -150,6 +150,11 @@ TEXTS = {
         "fr": "Télécharger et installer {app} {v} ? L’app redémarre toute seule.",
         "es": "¿Descargar e instalar {app} {v}? La app se reinicia sola.",
         "zh": "下载并安装 {app} {v}？程序会自动重启。"},
+    "Questa è una build personalizzata: gli aggiornamenti automatici sono disattivati.": {
+        "en": "This is a custom build: automatic updates are turned off.",
+        "fr": "Ceci est une version personnalisée : les mises à jour automatiques sont désactivées.",
+        "es": "Esta es una versión personalizada: las actualizaciones automáticas están desactivadas.",
+        "zh": "这是自行编译的版本：已关闭自动更新。"},
     "Scarico…": {"en": "Downloading…", "fr": "Téléchargement…", "es": "Descargando…", "zh": "正在下载…"},
     "Aggiornamento non riuscito.": {"en": "Update failed.", "fr": "Échec de la mise à jour.",
                                     "es": "La actualización falló.", "zh": "更新失败。"},

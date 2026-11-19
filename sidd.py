@@ -45,7 +45,14 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabe
 
 APP_NAME = "SiDD"
 APP_VERSION = "1.0.0"
-GITHUB_REPO = "Fabio-Va/simple-desktop-dashboard"  # da qui arrivano gli aggiornamenti (release GitHub)
+# Aggiornamenti automatici: solo la build ufficiale li riceve. Il file official.py (non su git)
+# esiste solo sul PC di chi pubblica le release; chi compila la propria versione modificata non
+# riceve aggiornamenti che la sovrascriverebbero, a meno di indicare il proprio repository con
+# "update_repo" in config.local.json.
+try:
+    from official import UPDATE_REPO
+except ImportError:
+    UPDATE_REPO = ""
 OLD_APP_NAME = "Dashboard"  # nome precedente: dati e avvio automatico vengono migrati
 IT = QLocale(QLocale.Italian, QLocale.Italy)
 SYSTEM = platform.system()  # "Windows", "Darwin", "Linux"
@@ -498,9 +505,17 @@ def version_tuple(v):
     return tuple(parts + [0] * (3 - len(parts)))
 
 
+def update_repo():
+    """Repository GitHub da cui arrivano gli aggiornamenti ("" = aggiornamenti disattivati)."""
+    return str(LOCAL.get("update_repo") or UPDATE_REPO).strip()
+
+
 def fetch_latest_release():
     """Ultima release pubblicata: versione, pagina e indirizzo di SiDD.exe."""
-    r = requests.get(f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+    repo = update_repo()
+    if not repo:
+        return None
+    r = requests.get(f"https://api.github.com/repos/{repo}/releases/latest",
                      headers={"Accept": "application/vnd.github+json", "User-Agent": f"{APP_NAME}/{APP_VERSION}"},
                      timeout=20)
     if r.status_code == 404:
@@ -2169,6 +2184,12 @@ class Main(QMainWindow):
 
     # ---- aggiornamenti
     def check_updates(self, manual=False):
+        if not update_repo():
+            if manual:
+                QMessageBox.information(self, APP_NAME, _("Questa è una build personalizzata: gli aggiornamenti "
+                                                          "automatici sono disattivati."))
+            return
+
         def done(rel):
             newer = rel and rel.get("version") and version_tuple(rel["version"]) > version_tuple(APP_VERSION)
             if newer:
