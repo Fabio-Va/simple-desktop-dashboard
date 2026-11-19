@@ -283,5 +283,111 @@ TEXTS = {
     "Non riesco a cambiare l’avvio automatico.": {"en": "Can't change the startup setting.",
                                                   "fr": "Impossible de modifier le démarrage automatique.",
                                                   "es": "No puedo cambiar el inicio automático.", "zh": "无法更改开机启动设置。"},
+
+    # --- meteo
+    "Meteo": {"en": "Weather", "fr": "Météo", "es": "Tiempo", "zh": "天气"},
+    "Sereno": {"en": "Clear", "fr": "Dégagé", "es": "Despejado", "zh": "晴"},
+    "Poco nuvoloso": {"en": "Mostly clear", "fr": "Peu nuageux", "es": "Poco nuboso", "zh": "少云"},
+    "Parzialmente nuvoloso": {"en": "Partly cloudy", "fr": "Partiellement nuageux", "es": "Parcialmente nuboso",
+                              "zh": "多云"},
+    "Coperto": {"en": "Overcast", "fr": "Couvert", "es": "Cubierto", "zh": "阴"},
+    "Nebbia": {"en": "Fog", "fr": "Brouillard", "es": "Niebla", "zh": "雾"},
+    "Pioggerella": {"en": "Drizzle", "fr": "Bruine", "es": "Llovizna", "zh": "毛毛雨"},
+    "Pioggia": {"en": "Rain", "fr": "Pluie", "es": "Lluvia", "zh": "雨"},
+    "Neve": {"en": "Snow", "fr": "Neige", "es": "Nieve", "zh": "雪"},
+    "Rovesci": {"en": "Showers", "fr": "Averses", "es": "Chubascos", "zh": "阵雨"},
+    "Rovesci di neve": {"en": "Snow showers", "fr": "Averses de neige", "es": "Chubascos de nieve", "zh": "阵雪"},
+    "Temporale": {"en": "Thunderstorm", "fr": "Orage", "es": "Tormenta", "zh": "雷暴"},
+    "Oggi": {"en": "Today", "fr": "Auj.", "es": "Hoy", "zh": "今天"},
+    "pioggia": {"en": "rain", "fr": "pluie", "es": "lluvia", "zh": "降雨"},
+    "Percepita {t}° · vento {w} km/h · umidità {h}%": {
+        "en": "Feels like {t}° · wind {w} km/h · humidity {h}%",
+        "fr": "Ressenti {t}° · vent {w} km/h · humidité {h} %",
+        "es": "Sensación {t}° · viento {w} km/h · humedad {h}%",
+        "zh": "体感 {t}° · 风速 {w} km/h · 湿度 {h}%"},
+    "Non riesco a scaricare il meteo. Riprovo tra 30 minuti.": {
+        "en": "Can't download the weather. Retrying in 30 minutes.",
+        "fr": "Impossible de télécharger la météo. Nouvel essai dans 30 minutes.",
+        "es": "No puedo descargar el tiempo. Reintento en 30 minutos.", "zh": "无法获取天气。30 分钟后重试。"},
+    "Imposta la tua località: premi la rotella ⚙ in alto, sezione «Meteo».": {
+        "en": "Set your location: press the ⚙ gear at the top, “Weather” section.",
+        "fr": "Choisissez votre lieu : roue ⚙ en haut, section « Météo ».",
+        "es": "Elige tu ubicación: pulsa la rueda ⚙ arriba, sección «Tiempo».",
+        "zh": "设置你的位置：点击顶部 ⚙ 齿轮，“天气”部分。"},
+    "Nessuna località": {"en": "No location", "fr": "Aucun lieu", "es": "Sin ubicación", "zh": "未设置位置"},
+    "Cambia località…": {"en": "Change location…", "fr": "Changer de lieu…", "es": "Cambiar ubicación…",
+                         "zh": "更改位置…"},
+    "Cerca la tua città": {"en": "Search for your city", "fr": "Cherchez votre ville", "es": "Busca tu ciudad",
+                           "zh": "搜索你的城市"},
+    "Città o località:": {"en": "City or place:", "fr": "Ville ou lieu :", "es": "Ciudad o lugar:", "zh": "城市或地点："},
+    "Non trovo «{name}».": {"en": "Can't find “{name}”.", "fr": "« {name} » introuvable.",
+                            "es": "No encuentro «{name}».", "zh": "找不到“{name}”。"},
+    "Quale intendi?": {"en": "Which one?", "fr": "Lequel ?", "es": "¿Cuál?", "zh": "是哪一个？"},
+    "Non riesco a cercare la località.": {"en": "Can't search for the location.",
+                                          "fr": "Impossible de chercher le lieu.",
+                                          "es": "No puedo buscar la ubicación.", "zh": "无法搜索位置。"},
+
+    # --- scorciatoia
+    "Scorciatoia da tastiera": {"en": "Keyboard shortcut", "fr": "Raccourci clavier", "es": "Atajo de teclado",
+                                "zh": "快捷键"},
+    "Mostra / nascondi la dashboard": {"en": "Show / hide the dashboard", "fr": "Afficher / masquer le tableau de bord",
+                                       "es": "Mostrar / ocultar el panel", "zh": "显示 / 隐藏仪表板"},
+    "Disattiva la scorciatoia": {"en": "Turn the shortcut off", "fr": "Désactiver le raccourci",
+                                 "es": "Desactivar el atajo", "zh": "关闭快捷键"},
+    "Non posso usare questa combinazione: serve almeno Ctrl, Alt o Win più una lettera, un numero o un tasto F, e non deve essere già usata da un altro programma.": {
+        "en": "Can't use this combination: it needs Ctrl, Alt or Win plus a letter, a number or an F key, and it must not be used by another program.",
+        "fr": "Combinaison impossible : il faut Ctrl, Alt ou Win plus une lettre, un chiffre ou une touche F, non utilisée par un autre programme.",
+        "es": "No puedo usar esta combinación: necesita Ctrl, Alt o Win más una letra, un número o una tecla F, y no debe usarla otro programa.",
+        "zh": "无法使用此组合：需要 Ctrl、Alt 或 Win 加字母、数字或 F 键，且未被其他程序占用。"},
+
+    # --- mercati personalizzati
+    "+ Titolo": {"en": "+ Symbol", "fr": "+ Titre", "es": "+ Valor", "zh": "+ 品种"},
+    "Aggiungi un titolo, un ETF, una valuta o una crypto": {
+        "en": "Add a stock, an ETF, a currency or a crypto", "fr": "Ajouter une action, un ETF, une devise ou une crypto",
+        "es": "Añade una acción, un ETF, una divisa o una cripto", "zh": "添加股票、ETF、货币或加密货币"},
+    "Rimuovi {name}": {"en": "Remove {name}", "fr": "Retirer {name}", "es": "Quitar {name}", "zh": "移除 {name}"},
+    "Nuovo titolo": {"en": "New symbol", "fr": "Nouveau titre", "es": "Nuevo valor", "zh": "新品种"},
+    "Simbolo come su Yahoo Finance (es. AAPL, ENI.MI, EURUSD=X, ETH-USD, ^STOXX50E):": {
+        "en": "Symbol as on Yahoo Finance (e.g. AAPL, ENI.MI, EURUSD=X, ETH-USD, ^STOXX50E):",
+        "fr": "Symbole comme sur Yahoo Finance (ex. AAPL, ENI.MI, EURUSD=X, ETH-USD, ^STOXX50E) :",
+        "es": "Símbolo como en Yahoo Finance (p. ej. AAPL, ENI.MI, EURUSD=X, ETH-USD, ^STOXX50E):",
+        "zh": "Yahoo Finance 上的代码（如 AAPL、ENI.MI、EURUSD=X、ETH-USD、^STOXX50E）："},
+    "Nome da mostrare:": {"en": "Display name:", "fr": "Nom affiché :", "es": "Nombre visible:", "zh": "显示名称："},
+    "Non trovo il simbolo «{sym}» su Yahoo Finance.": {"en": "Can't find “{sym}” on Yahoo Finance.",
+                                                       "fr": "Symbole « {sym} » introuvable sur Yahoo Finance.",
+                                                       "es": "No encuentro «{sym}» en Yahoo Finance.",
+                                                       "zh": "在 Yahoo Finance 上找不到“{sym}”。"},
+
+    # --- segnalazione bug
+    "Segnala un bug": {"en": "Report a bug", "fr": "Signaler un bug", "es": "Informar de un error", "zh": "报告问题"},
+    "Scrivi cosa non funziona": {"en": "Tell us what doesn't work", "fr": "Dites-nous ce qui ne marche pas",
+                                 "es": "Cuéntanos qué no funciona", "zh": "告诉我们哪里出了问题"},
+    "Cosa non funziona? Descrivi cosa stavi facendo e cosa è successo.": {
+        "en": "What doesn't work? Describe what you were doing and what happened.",
+        "fr": "Qu’est-ce qui ne marche pas ? Décrivez ce que vous faisiez et ce qui s’est passé.",
+        "es": "¿Qué no funciona? Describe qué estabas haciendo y qué pasó.",
+        "zh": "哪里出了问题？请描述你当时在做什么以及发生了什么。"},
+    "La tua email (facoltativa, per poterti rispondere)": {
+        "en": "Your email (optional, so we can reply)", "fr": "Votre e-mail (facultatif, pour vous répondre)",
+        "es": "Tu email (opcional, para poder responderte)", "zh": "你的邮箱（可选，便于回复）"},
+    "Includi versione e sistema operativo": {"en": "Include version and operating system",
+                                             "fr": "Inclure la version et le système",
+                                             "es": "Incluir versión y sistema operativo", "zh": "附带版本和操作系统信息"},
+    "La segnalazione arriva direttamente allo sviluppatore.": {
+        "en": "The report goes straight to the developer.", "fr": "Le signalement arrive directement au développeur.",
+        "es": "El informe llega directamente al desarrollador.", "zh": "报告会直接发送给开发者。"},
+    "Si apre la pagina delle segnalazioni su GitHub (serve un account GitHub).": {
+        "en": "The GitHub issues page opens (you need a GitHub account).",
+        "fr": "La page des signalements GitHub s’ouvre (un compte GitHub est nécessaire).",
+        "es": "Se abre la página de incidencias de GitHub (necesitas una cuenta de GitHub).",
+        "zh": "将打开 GitHub 问题页面（需要 GitHub 账号）。"},
+    "Invia": {"en": "Send", "fr": "Envoyer", "es": "Enviar", "zh": "发送"},
+    "Annulla": {"en": "Cancel", "fr": "Annuler", "es": "Cancelar", "zh": "取消"},
+    "Invio non riuscito. Apro la pagina delle segnalazioni su GitHub?": {
+        "en": "Sending failed. Open the GitHub issues page instead?",
+        "fr": "Échec de l’envoi. Ouvrir la page des signalements GitHub ?",
+        "es": "No se pudo enviar. ¿Abro la página de incidencias de GitHub?", "zh": "发送失败。要打开 GitHub 问题页面吗？"},
+    "Grazie! Segnalazione inviata.": {"en": "Thanks! Report sent.", "fr": "Merci ! Signalement envoyé.",
+                                      "es": "¡Gracias! Informe enviado.", "zh": "谢谢！报告已发送。"},
 }
 # fmt: on

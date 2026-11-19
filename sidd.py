@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
     recurring_ical_events = None
 
 from PySide6.QtCore import (Qt, QTimer, QDate, QUrl, QObject, Signal, QRunnable, QThreadPool, QPoint,
+                            QAbstractNativeEventFilter, QUrlQuery,
                             QStandardPaths, QLocale, QPointF, QRectF, QSize, QFileInfo, QByteArray)
 from PySide6.QtGui import (QDesktopServices, QTextCharFormat, QColor, QPainter, QPen, QPainterPath,
                            QFont, QLinearGradient, QBrush, QIcon, QAction, QPixmap, QKeySequence,
@@ -41,18 +42,24 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabe
                                QToolButton, QHBoxLayout, QVBoxLayout, QGridLayout, QCalendarWidget,
                                QListWidget, QListWidgetItem, QLineEdit, QDateEdit, QCheckBox,
                                QPlainTextEdit, QScrollArea, QMenu, QFileDialog, QInputDialog,
-                               QMessageBox, QFileIconProvider, QSizePolicy, QToolTip, QTabBar)
+                               QMessageBox, QFileIconProvider, QSizePolicy, QToolTip, QTabBar, QKeySequenceEdit, QDialog,
+                               QDialogButtonBox)
 
 APP_NAME = "SiDD"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 # Aggiornamenti automatici: solo la build ufficiale li riceve. Il file official.py (non su git)
 # esiste solo sul PC di chi pubblica le release; chi compila la propria versione modificata non
 # riceve aggiornamenti che la sovrascriverebbero, a meno di indicare il proprio repository con
 # "update_repo" in config.local.json.
 try:
-    from official import UPDATE_REPO
+    import official as _official
 except ImportError:
-    UPDATE_REPO = ""
+    _official = None
+UPDATE_REPO = getattr(_official, "UPDATE_REPO", "")
+# Segnalazioni bug: indirizzo di un modulo Formspree (o simile). L'email di chi le riceve resta sul
+# server del servizio: nel programma e nel traffico c'è solo il codice del modulo.
+BUG_REPORT_URL = getattr(_official, "BUG_REPORT_URL", "")
+PROJECT_REPO = "Fabio-Va/simple-desktop-dashboard"  # progetto originale (pagina delle segnalazioni)
 OLD_APP_NAME = "Dashboard"  # nome precedente: dati e avvio automatico vengono migrati
 IT = QLocale(QLocale.Italian, QLocale.Italy)
 SYSTEM = platform.system()  # "Windows", "Darwin", "Linux"
@@ -231,6 +238,11 @@ def stylesheet(t):
     QMenu::item {{ padding:7px 20px; border-radius:8px; }}
     QMenu::item:selected {{ background:{t['chip']}; color:{t['ink']}; }}
     QMenu::separator {{ height:1px; background:{t['line']}; margin:4px 8px; }}
+    QDialog, QMessageBox, QInputDialog {{ background:{t['popup']}; }}
+    QPlainTextEdit#bugtext {{ background:{t['surface2']}; border:1.5px solid transparent; border-radius:11px;
+        padding:6px 8px; }}
+    QPlainTextEdit#bugtext:focus {{ border-color:{t['accent']}; }}
+    QKeySequenceEdit QLineEdit {{ padding:5px 8px; }}
     QToolTip {{ background:{t['popup']}; color:{t['ink']}; border:1px solid {t['line']}; padding:4px 6px; }}
     """
 
@@ -257,9 +269,12 @@ def it_short(dstr):
 class Store:
     DEFAULTS = {"ical_urls": [], "tasks": [], "notes": [], "apps": [],
                 "on_bottom": False, "side": "right", "theme": "dark", "hidden": [],
-                "presets": {}, "music": "", "collapsed": [], "lang": "it", "markets": ["spx"]}
-    # impostazioni (ripristinabili); il resto sono i tuoi contenuti: note, task, app, calendari
-    SETTINGS = ("on_bottom", "side", "theme", "hidden", "presets", "music", "collapsed", "lang", "markets")
+                "presets": {}, "music": "", "collapsed": [], "lang": "it", "markets": ["spx"],
+                "custom_markets": [], "weather_loc": None, "hotkey": "Ctrl+Alt+D"}
+    # impostazioni (ripristinabili); il resto sono i tuoi contenuti: note, task, app, calendari,
+    # località del meteo e titoli personalizzati
+    SETTINGS = ("on_bottom", "side", "theme", "hidden", "presets", "music", "collapsed", "lang", "markets",
+                "hotkey")
 
     def __init__(self):
         base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
@@ -310,11 +325,14 @@ class Worker(QRunnable):
 
     def run(self):
         try:
-            result = self.fn(*self.args)
-        except Exception as e:  # noqa: BLE001
-            self.signals.failed.emit(str(e) or e.__class__.__name__)
-        else:
-            self.signals.done.emit(result)
+            try:
+                result = self.fn(*self.args)
+            except Exception as e:  # noqa: BLE001
+                self.signals.failed.emit(str(e) or e.__class__.__name__)
+            else:
+                self.signals.done.emit(result)
+        except RuntimeError:  # il programma si è chiuso mentre scaricava
+            pass
 
 
 _alive = set()
@@ -422,6 +440,15 @@ MARKETS = {
 DEFAULT_MARKETS = ["spx"]
 
 
+def sync_custom_markets(store):
+    """Aggiunge a MARKETS i titoli personalizzati (chiave "c:SIMBOLO", unità = valuta di Yahoo)."""
+    for k in [k for k in MARKETS if k.startswith("c:")]:
+        del MARKETS[k]
+    for c in store.data.get("custom_markets", []):
+        if isinstance(c, dict) and c.get("symbol"):
+            MARKETS["c:" + c["symbol"]] = (c.get("name") or c["symbol"], c["symbol"], None, None)
+
+
 def _yahoo(symbol):
     r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/" + requests.utils.quote(symbol, safe=""),
                      params={"range": "1y", "interval": "1d"},
@@ -435,7 +462,7 @@ def _yahoo(symbol):
     price = meta.get("regularMarketPrice")
     if price and pts:
         pts[-1] = (pts[-1][0], float(price))
-    return pts, "Yahoo Finance"
+    return pts, "Yahoo Finance", meta.get("currency") or ""
 
 
 def _stooq(symbol):
@@ -451,7 +478,7 @@ def _stooq(symbol):
         p = ln.split(",")
         if len(p) >= 5 and p[0] >= cutoff:
             pts.append((p[0], float(p[4])))
-    return pts, "Stooq"
+    return pts, "Stooq", ""
 
 
 def fetch_market(key):
@@ -461,9 +488,10 @@ def fetch_market(key):
         if not sym:
             continue
         try:
-            pts, src = fn(sym)
+            pts, src, currency = fn(sym)
             if len(pts) >= 5:
-                return {"points": pts, "source": src, "fetched": dt.datetime.now().strftime("%H:%M")}
+                return {"points": pts, "source": src, "currency": currency,
+                        "fetched": dt.datetime.now().strftime("%H:%M")}
             errs.append(f"{src}: pochi dati")
         except Exception as e:  # noqa: BLE001
             errs.append(str(e))
@@ -494,6 +522,48 @@ def range_points(pts, key):
     cutoff = (dt.date.fromisoformat(last[0]) - dt.timedelta(days=365)).isoformat()
     idx = next((i for i, p in enumerate(pts) if p[0] >= cutoff), 0)
     return pts[max(0, idx - 1):]
+
+
+# ---------------------------------------------------------------- meteo (Open-Meteo, gratuito e senza chiave)
+# codice meteo WMO -> (emoji di giorno, emoji di notte, descrizione)
+WMO = [((0,), "☀️", "🌙", "Sereno"), ((1,), "🌤️", "🌙", "Poco nuvoloso"), ((2,), "⛅", "☁️", "Parzialmente nuvoloso"),
+       ((3,), "☁️", "☁️", "Coperto"), ((45, 48), "🌫️", "🌫️", "Nebbia"), ((51, 53, 55, 56, 57), "🌦️", "🌧️", "Pioggerella"),
+       ((61, 63, 65, 66, 67), "🌧️", "🌧️", "Pioggia"), ((71, 73, 75, 77), "🌨️", "🌨️", "Neve"),
+       ((80, 81, 82), "🌦️", "🌧️", "Rovesci"), ((85, 86), "🌨️", "🌨️", "Rovesci di neve"),
+       ((95, 96, 99), "⛈️", "⛈️", "Temporale")]
+
+
+def wmo(code, day=True):
+    for codes, d, n, text in WMO:
+        if code in codes:
+            return (d if day else n), text
+    return "🌡️", ""
+
+
+def geocode(name):
+    """Cerca una località per nome: lista di {"name", "lat", "lon", "label"}."""
+    r = requests.get("https://geocoding-api.open-meteo.com/v1/search",
+                     params={"name": name, "count": 8, "language": language(), "format": "json"},
+                     headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"}, timeout=20)
+    r.raise_for_status()
+    out = []
+    for x in r.json().get("results", []) or []:
+        parts = [x.get("name"), x.get("admin1"), x.get("country")]
+        label = ", ".join(dict.fromkeys(p for p in parts if p))
+        out.append({"name": x.get("name", name), "lat": x["latitude"], "lon": x["longitude"], "label": label})
+    return out
+
+
+def fetch_weather(lat, lon):
+    r = requests.get("https://api.open-meteo.com/v1/forecast", params={
+        "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 6,
+        "current": "temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,relative_humidity_2m",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"},
+        headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"}, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    j["fetched"] = dt.datetime.now().strftime("%H:%M")
+    return j
 
 
 # ---------------------------------------------------------------- aggiornamenti (release GitHub)
@@ -562,6 +632,130 @@ def install_update(new_path):
         'del "%~f0"\r\n', encoding="mbcs" if SYSTEM == "Windows" else "utf-8", errors="replace")
     subprocess.Popen(["cmd", "/c", str(script)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                      | getattr(subprocess, "DETACHED_PROCESS", 0), close_fds=True)
+
+
+# ---------------------------------------------------------------- scorciatoia globale (Windows)
+HOTKEY_ID = 0x51DD
+WM_HOTKEY = 0x0312
+
+
+def _vk(key):
+    """Tasto Qt -> codice virtuale Windows (lettere, numeri, F1–F24, spazio e pochi altri)."""
+    k = int(getattr(key, "value", key))
+    if 0x41 <= k <= 0x5A or 0x30 <= k <= 0x39:
+        return k
+    if Qt.Key_F1.value <= k <= Qt.Key_F24.value:
+        return 0x70 + k - Qt.Key_F1.value
+    return {Qt.Key_Space.value: 0x20, Qt.Key_Home.value: 0x24, Qt.Key_End.value: 0x23,
+            Qt.Key_Insert.value: 0x2D, Qt.Key_PageUp.value: 0x21, Qt.Key_PageDown.value: 0x22,
+            Qt.Key_Pause.value: 0x13}.get(k)
+
+
+def set_global_hotkey(text):
+    """Registra la combinazione (es. "Ctrl+Alt+D"); "" la toglie. False se non è possibile."""
+    if SYSTEM != "Windows":
+        return not text
+    import ctypes
+    user32 = ctypes.windll.user32
+    user32.UnregisterHotKey(None, HOTKEY_ID)
+    if not text:
+        return True
+    seq = QKeySequence(text, QKeySequence.PortableText)
+    if seq.isEmpty():
+        return False
+    comb = seq[0]
+    mods, flags = comb.keyboardModifiers(), 0x4000  # MOD_NOREPEAT
+    for qt_mod, win_mod in ((Qt.AltModifier, 1), (Qt.ControlModifier, 2), (Qt.ShiftModifier, 4),
+                            (Qt.MetaModifier, 8)):
+        if mods & qt_mod:
+            flags |= win_mod
+    vk = _vk(comb.key())
+    if vk is None or not (flags & 0xB):  # serve almeno Ctrl, Alt o Win
+        return False
+    return bool(user32.RegisterHotKey(None, HOTKEY_ID, flags, vk))
+
+
+def toggle_window():
+    if not _windows:
+        return
+    w = _windows[-1]
+    if w.isVisible() and not w.isMinimized():
+        w.hide()
+    else:
+        w.showNormal()
+        w.dock_to_screen()
+        w.raise_()
+        w.activateWindow()
+
+
+class HotkeyFilter(QAbstractNativeEventFilter):
+    """Riceve da Windows il messaggio della scorciatoia globale."""
+
+    def nativeEventFilter(self, etype, message):
+        if bytes(etype) == b"windows_generic_MSG":
+            from ctypes import wintypes
+            msg = wintypes.MSG.from_address(int(message))
+            if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
+                QTimer.singleShot(0, toggle_window)
+                return True, 0
+        return False, 0
+
+
+# ---------------------------------------------------------------- segnalazione bug
+def system_info():
+    return f"{APP_NAME} {APP_VERSION} · {platform.platform()} · Python {platform.python_version()}"
+
+
+def send_bug_report(text, contact, info):
+    """Invia la segnalazione al modulo configurato. Restituisce True se è partita."""
+    payload = {"_subject": f"{APP_NAME} – bug report", "message": text,
+               "version": APP_VERSION, "system": info or ""}
+    if contact:
+        payload["email"] = contact  # risposta a chi ha segnalato, se l'ha indicata
+    r = requests.post(BUG_REPORT_URL, json=payload, timeout=20,
+                      headers={"Accept": "application/json", "User-Agent": f"{APP_NAME}/{APP_VERSION}"})
+    r.raise_for_status()
+    return True
+
+
+def github_issue_url(text, info):
+    q = QUrlQuery()
+    q.addQueryItem("title", "Bug: " + text.strip().splitlines()[0][:80] if text.strip() else "Bug")
+    q.addQueryItem("body", text + ("\n\n---\n" + info if info else ""))
+    u = QUrl(f"https://github.com/{update_repo() or PROJECT_REPO}/issues/new")
+    u.setQuery(q)
+    return u.toString(QUrl.FullyEncoded)
+
+
+class BugDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(_("Segnala un bug"))
+        self.setMinimumWidth(420)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(8)
+        lay.addWidget(label(_("Cosa non funziona? Descrivi cosa stavi facendo e cosa è successo."), wrap=True))
+        self.text = QPlainTextEdit()
+        self.text.setObjectName("bugtext")
+        self.text.setMinimumHeight(150)
+        lay.addWidget(self.text)
+        self.contact = QLineEdit()
+        self.contact.setPlaceholderText(_("La tua email (facoltativa, per poterti rispondere)"))
+        lay.addWidget(self.contact)
+        self.info = QCheckBox(_("Includi versione e sistema operativo"))
+        self.info.setChecked(True)
+        self.info.setToolTip(system_info())
+        lay.addWidget(self.info)
+        note = (_("La segnalazione arriva direttamente allo sviluppatore.") if BUG_REPORT_URL else
+                _("Si apre la pagina delle segnalazioni su GitHub (serve un account GitHub)."))
+        lay.addWidget(label(note, "status", wrap=True))
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText(_("Invia"))
+        bb.button(QDialogButtonBox.Ok).setObjectName("primary")
+        bb.button(QDialogButtonBox.Cancel).setText(_("Annulla"))
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
 
 
 # ---------------------------------------------------------------- utilità UI
@@ -1377,8 +1571,9 @@ class MarketPanel(Panel):
         self.msg.hide()
         last = self.pts[-1]
         self.price.setText(it_num(last[1]))
-        unit = MARKETS.get(self.current, ("", "", "", "punti"))[3]
-        self.when.setText(_(unit) + " · " + it_short(last[0]))
+        unit = MARKETS.get(self.current, (None,) * 4)[3]
+        unit = _(unit) if unit else res.get("currency", "")
+        self.when.setText((unit + " · " if unit else "") + it_short(last[0]))
         for k, c in self.cards.items():
             rp = range_points(self.pts, k)
             if len(rp) >= 2:
@@ -1402,6 +1597,109 @@ class MarketPanel(Panel):
         for k, c in self.cards.items():
             c.set_selected(k == key)
         self.chart.set_points(range_points(self.pts, key))
+
+
+# ---------------------------------------------------------------- meteo (scheda)
+class DayCard(Squircle):
+    def __init__(self):
+        super().__init__(radius=18, fill="surface2")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(6, 8, 6, 8)
+        lay.setSpacing(0)
+        self.day = label("", "status")
+        self.icon = label("")
+        self.icon.setStyleSheet("font-size:22px;")
+        self.temp = label("")
+        self.temp.setStyleSheet("font-size:12px; font-weight:600;")
+        for w in (self.day, self.icon, self.temp):
+            w.setAlignment(Qt.AlignCenter)
+            lay.addWidget(w)
+
+
+class WeatherPanel(Panel):
+    def __init__(self, store):
+        super().__init__(_("Meteo"))
+        self.store = store
+        self.msg = label("", "msg", wrap=True)
+        self.lay.addWidget(self.msg)
+        self.now = QWidget()
+        row = QHBoxLayout(self.now)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        self.icon = label("")
+        self.icon.setStyleSheet("font-size:40px;")
+        row.addWidget(self.icon)
+        self.temp = label("", "price")
+        row.addWidget(self.temp)
+        info = QVBoxLayout()
+        info.setSpacing(0)
+        self.cond = label("", "h3")
+        self.extra = label("", "status")
+        info.addStretch(1)
+        info.addWidget(self.cond)
+        info.addWidget(self.extra)
+        info.addStretch(1)
+        row.addLayout(info, 1)
+        self.lay.addWidget(self.now)
+        days = QHBoxLayout()
+        days.setSpacing(6)
+        self.days = [DayCard() for _i in range(6)]
+        for c in self.days:
+            days.addWidget(c, 1)
+        self.lay.addLayout(days)
+        self.head.addWidget(small_button("↻", _("Aggiorna"), self.refresh))
+        self.render(None)
+
+    def location(self):
+        loc = self.store.data.get("weather_loc")
+        return loc if isinstance(loc, dict) and "lat" in loc else None
+
+    def refresh(self):
+        loc = self.location()
+        self.set_status(loc["name"] if loc else "")
+        if loc:
+            run_bg(fetch_weather, (loc["lat"], loc["lon"]), self.render, self.on_err)
+        else:
+            self.render(None)
+
+    def on_err(self, m):
+        self.msg.setStyleSheet(f"color:{T['down']}")
+        self.msg.setText(_("Non riesco a scaricare il meteo. Riprovo tra 30 minuti.") + "\n" + m[:160])
+        self.msg.show()
+
+    def render(self, j):
+        has = bool(j)
+        self.now.setVisible(has)
+        for c in self.days:
+            c.setVisible(has)
+        if not has:
+            if not self.location():
+                self.msg.setStyleSheet("")
+                self.msg.setText(_("Imposta la tua località: premi la rotella ⚙ in alto, sezione «Meteo»."))
+                self.msg.show()
+            return
+        self.msg.hide()
+        cur, daily = j.get("current", {}), j.get("daily", {})
+        icon, text = wmo(cur.get("weather_code"), bool(cur.get("is_day", 1)))
+        self.icon.setText(icon)
+        self.temp.setText(f"{round(cur.get('temperature_2m', 0))}°")
+        self.cond.setText(_(text) if text else "")
+        self.extra.setText(_("Percepita {t}° · vento {w} km/h · umidità {h}%",
+                             t=round(cur.get("apparent_temperature", 0)), w=round(cur.get("wind_speed_10m", 0)),
+                             h=round(cur.get("relative_humidity_2m", 0))))
+        self.temp.setToolTip(_("Fonte: {src}, aggiornato alle {time}", src="Open-Meteo", time=j["fetched"]))
+        dates = daily.get("time", [])
+        for i, c in enumerate(self.days):
+            if i >= len(dates):
+                c.hide()
+                continue
+            d = QDate.fromString(dates[i], "yyyy-MM-dd")
+            c.day.setText(_("Oggi") if i == 0 else IT.toString(d, "ddd").capitalize().rstrip("."))
+            ic, tx = wmo(daily["weather_code"][i])
+            c.icon.setText(ic)
+            c.temp.setText(f"{round(daily['temperature_2m_max'][i])}° / {round(daily['temperature_2m_min'][i])}°")
+            rain = (daily.get("precipitation_probability_max") or [None] * 6)[i]
+            c.setToolTip(_(tx) + (f" · {_('pioggia')} {rain}%" if rain is not None else ""))
 
 
 # ---------------------------------------------------------------- calendario
@@ -1855,7 +2153,8 @@ def set_autostart(on):
 
 
 # ---------------------------------------------------------------- impostazioni (modalità configurazione)
-PANELS = [("notes", "Note"), ("calendar", "Calendario"), ("tasks", "Task"), ("market", "Mercati"), ("apps", "App")]
+PANELS = [("notes", "Note"), ("calendar", "Calendario"), ("tasks", "Task"), ("weather", "Meteo"), ("market", "Mercati"),
+          ("apps", "App")]
 
 
 class SettingsPanel(Panel):
@@ -1903,6 +2202,30 @@ class SettingsPanel(Panel):
         self.music_btns = self.segmented(_("Musica preferita"), [("", _("Nessuna"))] + [(k, v["name"]) for k, v in MUSIC.items()],
                                          main.set_music, stacked=True)
 
+        self.section(_("Meteo"))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        loc = store.data.get("weather_loc")
+        self.loc_label = label(loc.get("label", loc.get("name", "")) if isinstance(loc, dict) else _("Nessuna località"),
+                               wrap=True)
+        row.addWidget(self.loc_label, 1)
+        row.addWidget(small_button(_("Cambia località…"), _("Cerca la tua città"), main.choose_location))
+        self.lay.addLayout(row)
+
+        self.section(_("Scorciatoia da tastiera"))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(label(_("Mostra / nascondi la dashboard"), wrap=True), 1)
+        self.keyedit = QKeySequenceEdit(QKeySequence(store.data.get("hotkey") or ""))
+        self.keyedit.setMaximumSequenceLength(1)
+        self.keyedit.setFixedWidth(130)
+        self.keyedit.editingFinished.connect(
+            lambda: main.set_hotkey(self.keyedit.keySequence().toString(QKeySequence.PortableText)))
+        row.addWidget(self.keyedit)
+        row.addWidget(small_button(_("Nessuna"), _("Disattiva la scorciatoia"),
+                                   lambda: (self.keyedit.clear(), main.set_hotkey(""))))
+        self.lay.addLayout(row)
+
         self.section(_("Mercati"))
         chosen = set(store.data.get("markets", DEFAULT_MARKETS))
         grid = QGridLayout()
@@ -1911,8 +2234,25 @@ class SettingsPanel(Panel):
             cb = QCheckBox(_(m[0]).replace("&", "&&"))
             cb.setChecked(key in chosen)
             cb.toggled.connect(lambda on, k=key: main.set_market(k, on))
-            grid.addWidget(cb, i // 2, i % 2)
+            if key.startswith("c:"):  # titolo personalizzato: si può togliere
+                cell = QWidget()
+                h = QHBoxLayout(cell)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.setSpacing(4)
+                cb.setToolTip(m[1])
+                h.addWidget(cb)
+                x = small_button("✕", _("Rimuovi {name}", name=m[0]), lambda _c=False, k=key: main.remove_market(k))
+                x.setStyleSheet("padding:1px 7px; min-height:14px;")
+                h.addWidget(x)
+                h.addStretch(1)
+                grid.addWidget(cell, i // 2, i % 2)
+            else:
+                grid.addWidget(cb, i // 2, i % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         self.lay.addLayout(grid)
+        self.lay.addWidget(small_button(_("+ Titolo"), _("Aggiungi un titolo, un ETF, una valuta o una crypto"),
+                                        main.add_market), 0, Qt.AlignLeft)
 
         self.section(_("Altro"))
         row = QHBoxLayout()
@@ -1930,6 +2270,11 @@ class SettingsPanel(Panel):
         row.addWidget(small_button(_("Ripristina impostazioni"),
                                    _("Torna alle impostazioni predefinite (note, task e app restano)"),
                                    main.restore_defaults))
+        row.addStretch(1)
+        self.lay.addLayout(row)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(small_button(_("Segnala un bug"), _("Scrivi cosa non funziona"), main.report_bug))
         row.addStretch(1)
         self.lay.addLayout(row)
         quit_ = small_button(_("Chiudi la dashboard"), _("Chiude il programma"), main.close)
@@ -2024,6 +2369,7 @@ def rebuild_window(old):
     global T
     T = theme_for(old.store)
     apply_language(old.store)
+    sync_custom_markets(old.store)
     new = Main(old.store, config=old.gear.isChecked())
     _windows.append(new)
     new.show()
@@ -2100,6 +2446,7 @@ class Main(QMainWindow):
         self.calp = CalendarPanel(store, self.t, lambda: store.data["tasks"])
         self.market = MarketPanel(store, self.t)
         self.notes = NotesPanel(store)
+        self.weather = WeatherPanel(store)
         self.tasksp.changed.connect(lambda: (self.calp.paint_days(), self.calp.render_agenda()))
         self.settings = SettingsPanel(self)
         self.settings.hide()
@@ -2108,12 +2455,13 @@ class Main(QMainWindow):
         pair.addWidget(self.calp, 1)
         pair.addWidget(self.tasksp, 1)
         for key, w in (("notes", self.notes), ("calendar", self.calp), ("tasks", self.tasksp),
-                       ("market", self.market)):
+                       ("weather", self.weather), ("market", self.market)):
             w.enable_collapse(store, key)
             w.collapsedChanged.connect(self.align_pair)
         self.align_pair()
         col.addWidget(self.notes)
         col.addLayout(pair)
+        col.addWidget(self.weather)
         col.addWidget(self.market)
         col.addWidget(self.settings)
         col.addWidget(self.dock)
@@ -2124,6 +2472,8 @@ class Main(QMainWindow):
         t2 = QTimer(self, interval=5 * 60_000); t2.timeout.connect(self.calp.refresh); t2.start()
         t3 = QTimer(self, interval=15 * 60_000); t3.timeout.connect(self.market.refresh); t3.start()
         t4 = QTimer(self, interval=12 * 3600_000); t4.timeout.connect(self.check_updates); t4.start()
+        t5 = QTimer(self, interval=30 * 60_000); t5.timeout.connect(self.weather.refresh); t5.start()
+        QTimer.singleShot(400, self.weather.refresh)
         QTimer.singleShot(4000, self.check_updates)
         QTimer.singleShot(200, self.calp.refresh)
         QTimer.singleShot(300, self.market.refresh)
@@ -2157,7 +2507,7 @@ class Main(QMainWindow):
     def apply_visibility(self):
         hidden = set(self.store.data.get("hidden", []))
         for key, w in (("notes", self.notes), ("calendar", self.calp), ("tasks", self.tasksp),
-                       ("market", self.market), ("apps", self.dock)):
+                       ("weather", self.weather), ("market", self.market), ("apps", self.dock)):
             w.setVisible(key not in hidden)
 
     def set_panel_visible(self, key, on):
@@ -2181,6 +2531,102 @@ class Main(QMainWindow):
         self.market.set_markets()
         if on and key not in self.market.results:
             self.market.refresh()
+
+    # ---- meteo
+    def choose_location(self):
+        name, ok = QInputDialog.getText(self, _("Meteo"), _("Città o località:"))
+        if not ok or not name.strip():
+            return
+
+        def found(results):
+            if not results:
+                QMessageBox.information(self, APP_NAME, _("Non trovo «{name}».", name=name.strip()))
+                return
+            pick = results[0]
+            if len(results) > 1:
+                labels = [r["label"] for r in results]
+                choice, ok2 = QInputDialog.getItem(self, _("Meteo"), _("Quale intendi?"), labels, 0, False)
+                if not ok2:
+                    return
+                pick = results[labels.index(choice)]
+            self.store.data["weather_loc"] = pick
+            self.store.save()
+            self.settings.loc_label.setText(pick["label"])
+            self.weather.refresh()
+
+        def fail(m):
+            QMessageBox.warning(self, APP_NAME, _("Non riesco a cercare la località.") + f"\n{m[:200]}")
+        run_bg(geocode, (name.strip(),), found, fail)
+
+    # ---- mercati personalizzati
+    def add_market(self):
+        sym, ok = QInputDialog.getText(self, _("Nuovo titolo"), _(
+            "Simbolo come su Yahoo Finance (es. AAPL, ENI.MI, EURUSD=X, ETH-USD, ^STOXX50E):"))
+        sym = sym.strip().upper()
+        if not ok or not sym:
+            return
+        if "c:" + sym in MARKETS:
+            return
+        name, ok = QInputDialog.getText(self, _("Nuovo titolo"), _("Nome da mostrare:"), text=sym)
+        if not ok:
+            return
+
+        def done(_res):
+            self.store.data.setdefault("custom_markets", []).append({"symbol": sym, "name": name.strip() or sym})
+            self.store.data.setdefault("markets", list(DEFAULT_MARKETS)).append("c:" + sym)
+            sync_custom_markets(self.store)
+            self.store.save_now()
+            QTimer.singleShot(0, lambda: rebuild_window(self))
+
+        def fail(m):
+            QMessageBox.warning(self, APP_NAME, _("Non trovo il simbolo «{sym}» su Yahoo Finance.", sym=sym)
+                                + f"\n{m[:200]}")
+        run_bg(_yahoo, (sym,), done, fail)
+
+    def remove_market(self, key):
+        sym = key[2:]
+        d = self.store.data
+        d["custom_markets"] = [c for c in d.get("custom_markets", []) if c.get("symbol") != sym]
+        d["markets"] = [k for k in d.get("markets", []) if k != key]
+        sync_custom_markets(self.store)
+        self.store.save_now()
+        QTimer.singleShot(0, lambda: rebuild_window(self))
+
+    # ---- scorciatoia
+    def set_hotkey(self, text):
+        old = self.store.data.get("hotkey", "")
+        if text == old:
+            return
+        if set_global_hotkey(text):
+            self.store.data["hotkey"] = text
+            self.store.save()
+        else:
+            set_global_hotkey(old)
+            self.settings.keyedit.setKeySequence(QKeySequence(old, QKeySequence.PortableText))
+            QMessageBox.warning(self, APP_NAME, _("Non posso usare questa combinazione: serve almeno Ctrl, Alt o Win "
+                                                  "più una lettera, un numero o un tasto F, e non deve essere già "
+                                                  "usata da un altro programma."))
+
+    # ---- segnalazione bug
+    def report_bug(self):
+        dlg = BugDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        text = dlg.text.toPlainText().strip()
+        if not text:
+            return
+        info = system_info() if dlg.info.isChecked() else ""
+        contact = dlg.contact.text().strip()
+        if not BUG_REPORT_URL:
+            open_url(github_issue_url(text, info))
+            return
+
+        def fail(m):
+            if QMessageBox.question(self, APP_NAME, _("Invio non riuscito. Apro la pagina delle segnalazioni su "
+                                                      "GitHub?") + f"\n{m[:200]}") == QMessageBox.Yes:
+                open_url(github_issue_url(text, info))
+        run_bg(send_bug_report, (text, contact, info),
+               lambda _ok: QMessageBox.information(self, APP_NAME, _("Grazie! Segnalazione inviata.")), fail)
 
     # ---- aggiornamenti
     def check_updates(self, manual=False):
@@ -2243,6 +2689,7 @@ class Main(QMainWindow):
         for k in Store.SETTINGS:
             self.store.data[k] = json.loads(json.dumps(Store.DEFAULTS[k]))
         self.store.save_now()
+        set_global_hotkey(self.store.data["hotkey"])
         try:
             set_autostart(True)
         except (OSError, subprocess.SubprocessError):
@@ -2338,6 +2785,11 @@ def main():
     store = Store()
     T = theme_for(store)
     apply_language(store)
+    sync_custom_markets(store)
+    # scorciatoia globale per mostrare/nascondere la barra
+    app._hotkeys = HotkeyFilter()
+    app.installNativeEventFilter(app._hotkeys)
+    set_global_hotkey(store.data.get("hotkey") or "")
     win = Main(store)
     _windows.append(win)
     win.show()

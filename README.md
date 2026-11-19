@@ -2,7 +2,7 @@
 
 A native Windows sidebar dashboard (Python + PySide6) with an Apple-style squircle look.
 It docks to the left or right edge of the screen, 30% of the width and the full height, and keeps your
-notes, calendar, tasks, the markets and your favourite apps one glance away. No browser, no server, no account.
+notes, calendar, tasks, the weather, the markets and your favourite apps one glance away. No browser, no server, no account.
 
 ![Dark mode](docs/screenshot-dark.png)
 
@@ -18,6 +18,8 @@ notes, calendar, tasks, the markets and your favourite apps one glance away. No 
 - Every card can be **collapsed** with its chevron, or **hidden** from the settings; the state is remembered
 - Optional "stay on the desktop, below other windows" mode
 - Starts with Windows (optional) and minimizes with the – button
+- **Global keyboard shortcut** to show or hide the sidebar (default Ctrl+Alt+D, change it or turn it off in the settings)
+- **Report a bug** from the settings: write what went wrong and send it (or open a pre-filled GitHub issue)
 - **Updates**: at start-up (and every 12 hours) SiDD checks the latest GitHub release; when there is a newer one an "Update to x.y" button appears, downloads the new `SiDD.exe`, swaps it in and restarts. You can also check by hand from the settings
 - **Restore settings** puts every setting back to its default, keeping notes, tasks, apps and calendars
 - Languages: Italiano, English, Français, Español, 中文
@@ -40,8 +42,13 @@ notes, calendar, tasks, the markets and your favourite apps one glance away. No 
 - Tick to complete, "Clear" removes completed tasks
 - Right-click to edit, send to Google Calendar or delete
 
+### Weather
+- Current conditions, feels-like temperature, wind, humidity and a **6-day forecast**
+- Search your city in the settings; data from [Open-Meteo](https://open-meteo.com) (free, no API key), refreshed every 30 minutes
+
 ### Markets
 - Pick one or more of six instruments in the settings: **S&P 500, Nasdaq 100, Dow Jones, FTSE MIB, Bitcoin, Gold**
+- **Add your own**: any Yahoo Finance symbol (stocks such as `AAPL` or `ENI.MI`, ETFs, currencies such as `EURUSD=X`, crypto such as `ETH-USD`), shown in its own currency
 - With more than one, the card shows **browser-style tabs** to switch between them
 - Value and change over **3 days, this month and 1 year**; click a range to change the chart
 - Data from Yahoo Finance with Stooq as fallback, refreshed every 15 minutes
@@ -60,7 +67,7 @@ notes, calendar, tasks, the markets and your favourite apps one glance away. No 
 
 ### Privacy
 - Everything stays on your PC in `%APPDATA%\SiDD\data.json` (settings → "Data folder")
-- The only connections are to Google Calendar (your iCal address), Yahoo Finance/Stooq (market data) and the GitHub API (update check)
+- The only connections are to Google Calendar (your iCal address), Open-Meteo (weather for the location you set), Yahoo Finance/Stooq (market data), the GitHub API (update check) and, only when you send a bug report, the report form service
 
 ![Settings](docs/screenshot-settings.png)
 
@@ -117,7 +124,14 @@ To ship updates for your own fork, add your repository to `config.local.json` ne
 
 ## Releasing an update
 
-Official builds get their update source from `official.py` (one line, `UPDATE_REPO = "owner/repo"`), which is not in git and exists only on the maintainer's PC.
+Official builds read two settings from `official.py`, which is not in git and exists only on the maintainer's PC:
+
+```python
+UPDATE_REPO = "owner/repo"                          # where updates come from
+BUG_REPORT_URL = "https://formspree.io/f/your-form"  # where bug reports are sent
+```
+
+Bug reports go to a [Formspree](https://formspree.io) form: the maintainer's email address is stored only on Formspree, so it never appears in the app, in its traffic or in the source code. Without `BUG_REPORT_URL` the button opens a pre-filled GitHub issue instead.
 
 1. Raise `APP_VERSION` in `sidd.py` and run `build.bat`.
 2. Publish a GitHub release whose tag is the version and attach `SiDD.exe`:
