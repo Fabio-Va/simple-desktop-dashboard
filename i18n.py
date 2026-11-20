@@ -221,6 +221,12 @@ TEXTS = {
         "en": "No tasks. Type one above and press Enter.", "fr": "Aucune tâche. Écrivez-en une ci-dessus et appuyez sur Entrée.",
         "es": "No hay tareas. Escribe una arriba y pulsa Intro.", "zh": "没有任务。在上方输入并按回车。"},
     "Chiudi SiDD": {"en": "Close SiDD", "fr": "Fermer SiDD", "es": "Cerrar SiDD", "zh": "关闭 SiDD"},
+    "tutti i giorni": {"en": "every day", "fr": "tous les jours", "es": "todos los días", "zh": "每天"},
+    "{n} volte": {"en": "{n} times", "fr": "{n} fois", "es": "{n} veces", "zh": "{n} 次"},
+    "orari diversi": {"en": "different times", "fr": "horaires variés", "es": "horarios distintos", "zh": "时间不同"},
+    "Collega un calendario dalle impostazioni ⚙.": {
+        "en": "Connect a calendar in settings ⚙.", "fr": "Connectez un agenda dans les réglages ⚙.",
+        "es": "Conecta un calendario en los ajustes ⚙.", "zh": "在设置 ⚙ 中连接日历。"},
     "Questa settimana": {"en": "This week", "fr": "Cette semaine", "es": "Esta semana", "zh": "本周"},
     "{n} da fare": {"en": "{n} to do", "fr": "{n} à faire", "es": "{n} pendientes", "zh": "{n} 项待办"},
     "Modifica testo…": {"en": "Edit text…", "fr": "Modifier le texte…", "es": "Editar texto…", "zh": "编辑文本…"},

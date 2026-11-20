@@ -1904,11 +1904,11 @@ class CalendarPanel(Panel):
 
 # ---------------------------------------------------------------- task
 def week_groups(days, today=None):
-    """Eventi da oggi a domenica; quelli con lo stesso nome (ricorrenti) finiscono in un solo gruppo."""
+    """Eventi da lunedì a domenica; quelli con lo stesso nome (ricorrenti) finiscono in un solo gruppo."""
     today = today or dt.date.today()
-    end = today + dt.timedelta(days=6 - today.weekday())
+    d = today - dt.timedelta(days=today.weekday())
+    end = d + dt.timedelta(days=6)
     groups = {}
-    d = today
     while d <= end:
         for e in days.get(d.isoformat(), []):
             key = " ".join(e["title"].split()).casefold()
@@ -1918,12 +1918,45 @@ def week_groups(days, today=None):
     return list(groups.values())  # in ordine di prima comparsa
 
 
+def week_when(items):
+    """Quando cade un gruppo: "mar" / "mar/gio" / "mar/gio/ven", "4 volte", "tutti i giorni", poi l'orario."""
+    dates = sorted({d for d, _t in items})
+    abbr = lambda d: IT.toString(QDate(d.year, d.month, d.day), "ddd").rstrip(".")  # noqa: E731
+    n = len(dates)
+    if n >= 7:
+        when = _("tutti i giorni")
+    elif n >= 4:
+        when = _("{n} volte", n=n)
+    else:
+        when = "/".join(abbr(d) for d in dates)
+    times = {t for _d, t in items}
+    if len(times) == 1:
+        return f"{when} · {_(items[0][1])}"
+    if n <= 3:  # pochi giorni con orari diversi: ogni giorno col suo orario
+        return ", ".join(f"{abbr(d)} {_(t)}" for d, t in sorted(items))
+    return f"{when} · " + _("orari diversi")
+
+
 class TasksPanel(Panel):
     changed = Signal()
 
     def __init__(self, store, theme):
         super().__init__(_("Task"), compact=True)
         self.store, self.t = store, theme
+        # due schede: i task e gli eventi della settimana
+        self.tabs = QTabBar()
+        self.tabs.setObjectName("tabs")
+        self.tabs.setDocumentMode(True)
+        self.tabs.setExpanding(False)
+        self.tabs.setDrawBase(False)
+        self.tabs.setCursor(Qt.PointingHandCursor)
+        self.tabs.addTab(_("Task"))
+        self.tabs.addTab(_("Questa settimana"))
+        self.lay.addWidget(self.tabs)
+        self.task_page = QWidget()
+        tp = QVBoxLayout(self.task_page)
+        tp.setContentsMargins(0, 0, 0, 0)
+        tp.setSpacing(self.lay.spacing())
         top = QHBoxLayout()
         top.setSpacing(6)
         self.text = QLineEdit()
@@ -1931,7 +1964,7 @@ class TasksPanel(Panel):
         self.text.returnPressed.connect(self.add)
         top.addWidget(self.text, 1)
         top.addWidget(small_button("+", _("Aggiungi il task"), self.add, "primary"))
-        self.lay.addLayout(top)
+        tp.addLayout(top)
         form = QHBoxLayout()
         form.setSpacing(6)
         self.has_due = QCheckBox(_("entro"))
@@ -1942,58 +1975,65 @@ class TasksPanel(Panel):
         self.has_due.toggled.connect(self.due.setEnabled)
         form.addWidget(self.has_due)
         form.addWidget(self.due, 1)
-        self.lay.addLayout(form)
+        tp.addLayout(form)
         self.list = AutoList()
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self.menu)
         self.list.itemChanged.connect(self.toggled)
         QShortcut(QKeySequence.Delete, self.list, activated=self.delete_selected)
-        self.lay.addWidget(self.list)
-        self.week_title = label(_("Questa settimana"), "h3")
-        self.lay.addWidget(self.week_title)
+        tp.addWidget(self.list)
+        self.lay.addWidget(self.task_page)
         self.week = AutoList()
         self.lay.addWidget(self.week)
         self.lay.addStretch(1)
-        self.head.addWidget(small_button(_("Pulisci"), _("Togli i task completati"), self.clear_done))
+        self.clear_btn = small_button(_("Pulisci"), _("Togli i task completati"), self.clear_done)
+        self.head.addWidget(self.clear_btn)
         self.days = None  # arriva dal calendario
         self.render()
         self.render_week()
+        self.tabs.currentChanged.connect(self.show_tab)
+        self.tabs.setCurrentIndex(1 if store.data.get("tasks_tab") == "week" else 0)
+        self.show_tab(self.tabs.currentIndex())
+
+    def show_tab(self, i):
+        week = i == 1
+        self.task_page.setVisible(not week)
+        self.clear_btn.setVisible(not week)
+        self.week.setVisible(week)
+        if self.store.data.get("tasks_tab", "tasks") != ("week" if week else "tasks"):
+            self.store.data["tasks_tab"] = "week" if week else "tasks"
+            self.store.save()
 
     def set_days(self, days):
         self.days = days
         self.render_week()
 
+    def _week_note(self, text):
+        it = QListWidgetItem(text)
+        it.setFlags(Qt.NoItemFlags)
+        it.setForeground(QColor(self.t["muted"]))
+        self.week.addItem(it)
+
     def render_week(self):
-        """Eventi della settimana; gli eventi ricorrenti (stesso nome) stanno su una riga sola."""
-        show = self.days is not None and bool(self.store.data["ical_urls"])
-        self.week_title.setVisible(show)
-        self.week.setVisible(show)
-        if not show:
-            return
+        """Eventi da lunedì a domenica; gli eventi ricorrenti (stesso nome) stanno su una riga sola."""
         self.week.clear()
         today = dt.date.today()
-
-        def day_name(d):
-            return _("oggi") if d == today else IT.toString(QDate(d.year, d.month, d.day), "ddd")
-
-        for g in week_groups(self.days, today):
-            items = g["items"]
-            times = {t for _d, t in items}
-            if len(times) == 1:
-                when = ", ".join(day_name(d) for d, _t in items) + " · " + _(items[0][1])
-            else:
-                when = ", ".join(f"{day_name(d)} {_(t)}" for d, t in items)
-            title = g["title"] + (f"  ×{len(items)}" if len(items) > 1 else "")
-            it = QListWidgetItem(f"{title}\n{when}")
-            it.setFlags(Qt.ItemIsEnabled)
-            it.setToolTip(g["title"] + "\n" + "\n".join(
-                f"{IT.toString(QDate(d.year, d.month, d.day), 'dddd d MMM')} · {_(t)}" for d, t in items))
-            self.week.addItem(it)
-        if not self.week.count():
-            it = QListWidgetItem(_("Niente in programma."))
-            it.setFlags(Qt.NoItemFlags)
-            it.setForeground(QColor(self.t["muted"]))
-            self.week.addItem(it)
+        if not self.store.data["ical_urls"]:
+            self._week_note(_("Collega un calendario dalle impostazioni ⚙."))
+        elif self.days is None:
+            self._week_note("…")
+        else:
+            for g in week_groups(self.days, today):
+                items = g["items"]
+                it = QListWidgetItem(f"{g['title']}\n{week_when(items)}")
+                it.setFlags(Qt.ItemIsEnabled)
+                if max(d for d, _t in items) < today:  # già passato
+                    it.setForeground(QColor(self.t["muted"]))
+                it.setToolTip(g["title"] + "\n" + "\n".join(
+                    f"{IT.toString(QDate(d.year, d.month, d.day), 'dddd d MMM')} · {_(t)}" for d, t in items))
+                self.week.addItem(it)
+            if not self.week.count():
+                self._week_note(_("Niente in programma."))
         fit_list(self.week)
 
     def tasks(self):
