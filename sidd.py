@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabe
                                QListWidget, QListWidgetItem, QLineEdit, QDateEdit, QCheckBox,
                                QPlainTextEdit, QScrollArea, QMenu, QFileDialog, QInputDialog,
                                QMessageBox, QFileIconProvider, QSizePolicy, QToolTip, QTabBar, QKeySequenceEdit, QDialog,
-                               QDialogButtonBox)
+                               QDialogButtonBox, QStackedLayout)
 
 APP_NAME = "SiDD"
 APP_VERSION = "1.1.0"
@@ -229,6 +229,7 @@ def stylesheet(t):
     QTabBar QToolButton {{ background:{t['surface']}; border:none; border-radius:8px; color:{t['ink']}; }}
     QScrollArea {{ background:transparent; border:none; }}
     QScrollArea > QWidget > QWidget {{ background:transparent; }}
+    QScrollArea > QWidget > QWidget#overlay {{ background:{'#F5141416' if t.get('glass') else t['bg']}; }}
     QScrollBar:vertical {{ background:transparent; width:8px; margin:4px 1px; }}
     QScrollBar::handle:vertical {{ background:{t['muted']}; border-radius:3px; min-height:40px; }}
     QScrollBar::handle:vertical:!hover {{ background:{t['line']}; }}
@@ -1808,6 +1809,8 @@ class MonthCalendar(QCalendarWidget):
 
 
 class CalendarPanel(Panel):
+    loaded = Signal(dict)  # giorno "yyyy-MM-dd" -> eventi, a ogni sincronizzazione
+
     def __init__(self, store, theme, tasks_getter):
         super().__init__(_("Calendario"), compact=True)
         self.store, self.t, self.tasks_getter = store, theme, tasks_getter
@@ -1860,6 +1863,7 @@ class CalendarPanel(Panel):
         self.msg.hide()
         self.paint_days()
         self.render_agenda()
+        self.loaded.emit(self.days)
 
     def on_err(self, m):
         self.msg.setStyleSheet(f"color:{self.t['down']}")
@@ -1899,6 +1903,21 @@ class CalendarPanel(Panel):
 
 
 # ---------------------------------------------------------------- task
+def week_groups(days, today=None):
+    """Eventi da oggi a domenica; quelli con lo stesso nome (ricorrenti) finiscono in un solo gruppo."""
+    today = today or dt.date.today()
+    end = today + dt.timedelta(days=6 - today.weekday())
+    groups = {}
+    d = today
+    while d <= end:
+        for e in days.get(d.isoformat(), []):
+            key = " ".join(e["title"].split()).casefold()
+            g = groups.setdefault(key, {"title": e["title"], "items": []})
+            g["items"].append((d, e["time"]))
+        d += dt.timedelta(days=1)
+    return list(groups.values())  # in ordine di prima comparsa
+
+
 class TasksPanel(Panel):
     changed = Signal()
 
@@ -1930,9 +1949,52 @@ class TasksPanel(Panel):
         self.list.itemChanged.connect(self.toggled)
         QShortcut(QKeySequence.Delete, self.list, activated=self.delete_selected)
         self.lay.addWidget(self.list)
+        self.week_title = label(_("Questa settimana"), "h3")
+        self.lay.addWidget(self.week_title)
+        self.week = AutoList()
+        self.lay.addWidget(self.week)
         self.lay.addStretch(1)
         self.head.addWidget(small_button(_("Pulisci"), _("Togli i task completati"), self.clear_done))
+        self.days = None  # arriva dal calendario
         self.render()
+        self.render_week()
+
+    def set_days(self, days):
+        self.days = days
+        self.render_week()
+
+    def render_week(self):
+        """Eventi della settimana; gli eventi ricorrenti (stesso nome) stanno su una riga sola."""
+        show = self.days is not None and bool(self.store.data["ical_urls"])
+        self.week_title.setVisible(show)
+        self.week.setVisible(show)
+        if not show:
+            return
+        self.week.clear()
+        today = dt.date.today()
+
+        def day_name(d):
+            return _("oggi") if d == today else IT.toString(QDate(d.year, d.month, d.day), "ddd")
+
+        for g in week_groups(self.days, today):
+            items = g["items"]
+            times = {t for _d, t in items}
+            if len(times) == 1:
+                when = ", ".join(day_name(d) for d, _t in items) + " · " + _(items[0][1])
+            else:
+                when = ", ".join(f"{day_name(d)} {_(t)}" for d, t in items)
+            title = g["title"] + (f"  ×{len(items)}" if len(items) > 1 else "")
+            it = QListWidgetItem(f"{title}\n{when}")
+            it.setFlags(Qt.ItemIsEnabled)
+            it.setToolTip(g["title"] + "\n" + "\n".join(
+                f"{IT.toString(QDate(d.year, d.month, d.day), 'dddd d MMM')} · {_(t)}" for d, t in items))
+            self.week.addItem(it)
+        if not self.week.count():
+            it = QListWidgetItem(_("Niente in programma."))
+            it.setFlags(Qt.NoItemFlags)
+            it.setForeground(QColor(self.t["muted"]))
+            self.week.addItem(it)
+        fit_list(self.week)
 
     def tasks(self):
         return self.store.data["tasks"]
@@ -2439,17 +2501,41 @@ class Main(QMainWindow):
         col.setContentsMargins(0, 2, 8, 16)
         col.setSpacing(12)
         scroll.setWidget(content)
-        outer.addWidget(scroll, 1)
+        # le impostazioni si aprono sopra la colonna (overlay), non come scheda in fondo
+        body = QWidget()
+        self.stack = QStackedLayout(body)
+        self.stack.setStackingMode(QStackedLayout.StackAll)
+        self.stack.addWidget(scroll)
+        outer.addWidget(body, 1)
 
+        # app: fisse in fondo alla finestra, sempre visibili mentre il resto scorre
         self.dock = Dock(store)
+        foot = QVBoxLayout()
+        foot.setContentsMargins(0, 0, 8, 14)
+        foot.addWidget(self.dock)
+        outer.addLayout(foot)
         self.tasksp = TasksPanel(store, self.t)
         self.calp = CalendarPanel(store, self.t, lambda: store.data["tasks"])
         self.market = MarketPanel(store, self.t)
         self.notes = NotesPanel(store)
         self.weather = WeatherPanel(store)
         self.tasksp.changed.connect(lambda: (self.calp.paint_days(), self.calp.render_agenda()))
+        self.calp.loaded.connect(self.tasksp.set_days)
         self.settings = SettingsPanel(self)
-        self.settings.hide()
+        self.overlay = QScrollArea()
+        self.overlay.setWidgetResizable(True)
+        self.overlay.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.overlay.setFrameShape(QFrame.NoFrame)
+        ob = QWidget()
+        ob.setObjectName("overlay")
+        ol = QVBoxLayout(ob)
+        ol.setContentsMargins(0, 2, 8, 16)
+        ol.addWidget(self.settings)
+        ol.addStretch(1)
+        self.overlay.setWidget(ob)
+        self.stack.addWidget(self.overlay)
+        self.stack.setCurrentWidget(scroll)
+        self.overlay.hide()
         self.pair = pair = QHBoxLayout()  # calendario | task
         pair.setSpacing(12)
         pair.addWidget(self.calp, 1)
@@ -2463,8 +2549,6 @@ class Main(QMainWindow):
         col.addLayout(pair)
         col.addWidget(self.weather)
         col.addWidget(self.market)
-        col.addWidget(self.settings)
-        col.addWidget(self.dock)
         col.addStretch(1)
 
         self.tick()
@@ -2739,12 +2823,11 @@ class Main(QMainWindow):
         if self.gear.isChecked() != on:
             self.gear.setChecked(on)  # richiama questa funzione tramite toggled
             return
-        self.settings.setVisible(on)
-        self.dock.set_editing(on)
+        self.overlay.setVisible(on)
         if on:
-            # porta in vista impostazioni e app, che stanno in fondo
-            QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
-                self.scroll.verticalScrollBar().maximum()))
+            self.stack.setCurrentWidget(self.overlay)  # sopra la colonna
+            self.overlay.verticalScrollBar().setValue(0)
+        self.dock.set_editing(on)
 
     def tick(self):
         now = dt.datetime.now()
@@ -2768,9 +2851,31 @@ class Main(QMainWindow):
     def showEvent(self, e):
         super().showEvent(e)
         # la finestra nativa può essere ricreata (es. "sempre sotto"): riapplico la sfocatura
-        if self.t["glass"] and not enable_blur(self.winId()) and not getattr(self, "_solid", False):
-            self._solid = True  # niente sfocatura disponibile: sfondo pieno per restare leggibile
+        if self.t["glass"] and not getattr(self, "_blur_retry", False):
+            self._apply_blur()
+
+    def _apply_blur(self, tries=0):
+        """Vetro: sfocatura di Windows. All'accensione del PC può non essere ancora pronta: sfondo pieno
+        provvisorio per restare leggibile e nuovi tentativi, poi si torna al vetro."""
+        solid = getattr(self, "_solid", False)
+        self._blur_retry = False
+        if enable_blur(self.winId()):
+            if solid:
+                self._solid = False
+                self.setStyleSheet(stylesheet(self.t))
+            return
+        if not solid:
+            self._solid = True
             self.setStyleSheet(self.styleSheet() + "#root { background:#E6141416; }")
+        if tries < 60:  # per circa 2 minuti
+            self._blur_retry = True
+
+            def again():
+                try:
+                    self._apply_blur(tries + 1)
+                except RuntimeError:  # finestra ricostruita nel frattempo (cambio tema/lingua)
+                    pass
+            QTimer.singleShot(2000, again)
 
     def closeEvent(self, e):
         self.store.save_now()
