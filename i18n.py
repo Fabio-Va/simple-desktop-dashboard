@@ -220,6 +220,7 @@ TEXTS = {
     "Nessun task. Scrivine uno qui sopra e premi Invio.": {
         "en": "No tasks. Type one above and press Enter.", "fr": "Aucune tâche. Écrivez-en une ci-dessus et appuyez sur Entrée.",
         "es": "No hay tareas. Escribe una arriba y pulsa Intro.", "zh": "没有任务。在上方输入并按回车。"},
+    "Chiudi SiDD": {"en": "Close SiDD", "fr": "Fermer SiDD", "es": "Cerrar SiDD", "zh": "关闭 SiDD"},
     "Questa settimana": {"en": "This week", "fr": "Cette semaine", "es": "Esta semana", "zh": "本周"},
     "{n} da fare": {"en": "{n} to do", "fr": "{n} à faire", "es": "{n} pendientes", "zh": "{n} 项待办"},
     "Modifica testo…": {"en": "Edit text…", "fr": "Modifier le texte…", "es": "Editar texto…", "zh": "编辑文本…"},

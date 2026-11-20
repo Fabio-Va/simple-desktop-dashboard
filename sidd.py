@@ -2485,8 +2485,15 @@ class Main(QMainWindow):
         mini.setToolTip(_("Riduci a icona"))
         mini.setCursor(Qt.PointingHandCursor)
         mini.clicked.connect(self.showMinimized)
+        close = QToolButton()
+        close.setObjectName("round")
+        close.setText("✕")
+        close.setToolTip(_("Chiudi SiDD"))
+        close.setCursor(Qt.PointingHandCursor)
+        close.clicked.connect(self.quit_app)
         row.addWidget(mini)
         row.addWidget(gear)
+        row.addWidget(close)
         btns.addLayout(row)
         head.addLayout(btns)
         outer.addLayout(head)
@@ -2880,6 +2887,10 @@ class Main(QMainWindow):
     def closeEvent(self, e):
         self.store.save_now()
         super().closeEvent(e)
+
+    def quit_app(self):
+        self.store.save_now()
+        QApplication.quit()
 
 
 def main():
