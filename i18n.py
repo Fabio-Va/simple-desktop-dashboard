@@ -101,6 +101,12 @@ TEXTS = {
     "punti": {"en": "points", "fr": "points", "es": "puntos", "zh": "点"},
     "Mercati": {"en": "Markets", "fr": "Marchés", "es": "Mercados", "zh": "市场"},
     "Oro": {"en": "Gold", "fr": "Or", "es": "Oro", "zh": "黄金"},
+    "Materie prime": {"en": "Commodities", "fr": "Matières premières", "es": "Materias primas", "zh": "大宗商品"},
+    "S&P 500 senza tech": {"en": "S&P 500 ex-tech", "fr": "S&P 500 hors tech", "es": "S&P 500 sin tecnología",
+                           "zh": "标普500（不含科技）"},
+    "Cina (Shanghai)": {"en": "China (Shanghai)", "fr": "Chine (Shanghai)", "es": "China (Shanghái)", "zh": "中国（上证）"},
+    "Paesi emergenti": {"en": "Emerging markets", "fr": "Marchés émergents", "es": "Mercados emergentes",
+                        "zh": "新兴市场"},
     "Nessun titolo scelto. Premi la rotella ⚙ e scegline uno in «Mercati».": {
         "en": "No instrument chosen. Press the ⚙ gear and pick one under “Markets”.",
         "fr": "Aucun titre choisi. Appuyez sur la roue ⚙ et choisissez-en un dans « Marchés ».",

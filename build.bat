@@ -27,8 +27,9 @@ echo  [2/3] Scarico le librerie...
 ".build\venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt pyinstaller || goto :errore
 
 echo  [3/3] Compilo...
-taskkill /im SiDD.exe /f >nul 2>nul
-taskkill /im Dashboard.exe /f >nul 2>nul
+rem chiudo SiDD e aspetto che liberi davvero SiDD.exe (fino a 15 secondi), se no PyInstaller non riesce a sostituirlo
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Stop-Process -Name SiDD,Dashboard -Force -ErrorAction SilentlyContinue; $f='%~dp0SiDD.exe'; for($i=0;$i -lt 30;$i++){ if(-not (Test-Path $f)){break}; try{ [IO.File]::Open($f,'Open','ReadWrite','None').Close(); break } catch { Start-Sleep -Milliseconds 500 } }"
 ".build\venv\Scripts\pyinstaller.exe" --noconfirm --clean --windowed --onefile --name SiDD --icon "%~dp0icon.ico" ^
   --collect-submodules recurring_ical_events --collect-data icalendar ^
   --workpath ".build\work" --specpath ".build" --distpath "%~dp0." "%~dp0sidd.py" || goto :errore

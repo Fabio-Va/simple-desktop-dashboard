@@ -476,6 +476,11 @@ MARKETS = {
     "ftsemib": ("FTSE MIB", "FTSEMIB.MI", None, "punti"),
     "btc": ("Bitcoin", "BTC-USD", "btcusd", "USD"),
     "gold": ("Oro", "GC=F", "xauusd", "USD/oz"),
+    "gsci": ("Materie prime", "^SPGSCI", None, "punti"),           # S&P GSCI
+    "world": ("MSCI World", "^990100-USD-STRD", None, "punti"),
+    "spxt": ("S&P 500 senza tech", "SPXT", None, "USD"),           # ETF S&P 500 ex Information Technology
+    "china": ("Cina (Shanghai)", "000001.SS", None, "punti"),     # Shanghai Composite
+    "em": ("Paesi emergenti", "EEM", None, "USD"),                 # ETF MSCI Emerging Markets
 }
 DEFAULT_MARKETS = ["spx"]
 
@@ -1423,9 +1428,10 @@ class Chart(QWidget):
         by = y(self.pts[0][1])
         p.drawLine(QPointF(r.left(), by), QPointF(r.right(), by))
         d0, d1 = (QDate.fromString(self.pts[i][0], "yyyy-MM-dd") for i in (0, -1))
-        # su più anni: una linea leggera all'inizio di ogni anno, con l'anno scritto sotto
+        # su un anno o più: una linea leggera al primo gennaio, con l'anno scritto in alto nel grafico
+        long_span = d0.daysTo(d1) > 300
         years = []
-        if d0.daysTo(d1) > 730:
+        if long_span:
             years = [i for i in range(1, len(self.pts)) if self.pts[i][0][:4] != self.pts[i - 1][0][:4]]
             p.setPen(QPen(QColor(self.t["line"]), 1))
             for i in years:
@@ -1453,18 +1459,24 @@ class Chart(QWidget):
         p.drawText(QPointF(r.right() + 8, y(hi) + 4), it_num(hi))
         p.drawText(QPointF(r.right() + 8, y(lo) + 4), it_num(lo))
         fm = p.fontMetrics()
-        if years:  # anni centrati sulle loro linee; vicino ai bordi li sposto un po' verso l'interno
-            for i in years:
-                t = self.pts[i][0][:4]
-                w = fm.horizontalAdvance(t)
-                left = min(max(x(i) - w / 2, 0), self.width() - w)
-                p.drawText(QPointF(left, self.height() - 6), t)
-        else:
-            long_span = d0.daysTo(d1) > 300  # su un anno serve anche l'anno
-            lab = (lambda d: IT.toString(d, "MMM yyyy")) if long_span else (lambda d: IT.toString(d, "d MMM"))
-            p.drawText(QPointF(r.left(), self.height() - 6), lab(d0))
-            lastlab = lab(d1)
-            p.drawText(QPointF(r.right() - fm.horizontalAdvance(lastlab), self.height() - 6), lastlab)
+        # estremi sotto il grafico
+        lab = (lambda d: IT.toString(d, "MMM yyyy")) if long_span else (lambda d: IT.toString(d, "d MMM"))
+        p.drawText(QPointF(r.left(), self.height() - 6), lab(d0))
+        lastlab = lab(d1)
+        p.drawText(QPointF(r.right() - fm.horizontalAdvance(lastlab), self.height() - 6), lastlab)
+        # anni in alto, subito a destra della loro linea, su una pillola per restare leggibili sopra la curva
+        pill = QColor(self.t["popup"])
+        pill.setAlpha(220)
+        for i in years:
+            t = self.pts[i][0][:4]
+            w, h = fm.horizontalAdvance(t) + 8, fm.height() + 2
+            left = min(x(i) + 3, r.right() - w)
+            box = QRectF(left, r.top() - 6, w, h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(pill)
+            p.drawRoundedRect(box, h / 2, h / 2)
+            p.setPen(muted)
+            p.drawText(box, Qt.AlignCenter, t)
         if self.hover is not None:
             i = self.hover
             p.setPen(QPen(muted, 1))
@@ -2353,30 +2365,6 @@ class SettingsPanel(Panel):
             grid.addWidget(cb, i // 2, i % 2)
         self.lay.addLayout(grid)
 
-        self.section(_("App predefinite"))
-        presets = {**PRESET_DEFAULTS, **store.data.get("presets", {})}
-        grid = QGridLayout()
-        grid.setSpacing(4)
-        items = [(k, PRESETS[k]["name"]) for k in PRESETS]
-        for i, (key, name) in enumerate(items):
-            cb = QCheckBox(name)
-            cb.setChecked(bool(presets.get(key)))
-            cb.toggled.connect(lambda on, k=key: main.set_preset(k, on))
-            grid.addWidget(cb, i // 2, i % 2)
-        self.lay.addLayout(grid)
-        self.music_btns = self.segmented(_("Musica preferita"), [("", _("Nessuna"))] + [(k, v["name"]) for k, v in MUSIC.items()],
-                                         main.set_music, stacked=True)
-
-        self.section(_("Meteo"))
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        loc = store.data.get("weather_loc")
-        self.loc_label = label(loc.get("label", loc.get("name", "")) if isinstance(loc, dict) else _("Nessuna località"),
-                               wrap=True)
-        row.addWidget(self.loc_label, 1)
-        row.addWidget(small_button(_("Cambia località…"), _("Cerca la tua città"), main.choose_location))
-        self.lay.addLayout(row)
-
         self.section(_("Scorciatoia da tastiera"))
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -2389,6 +2377,25 @@ class SettingsPanel(Panel):
         row.addWidget(self.keyedit)
         row.addWidget(small_button(_("Nessuna"), _("Disattiva la scorciatoia"),
                                    lambda: (self.keyedit.clear(), main.set_hotkey(""))))
+        self.lay.addLayout(row)
+
+        # da qui in poi una sezione per pannello, nello stesso ordine della dashboard
+        self.section(_("Calendario"))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(small_button(_("Collega Google Calendar"), _("Imposta i calendari Google"),
+                                   lambda: main.calp.configure()))
+        row.addStretch(1)
+        self.lay.addLayout(row)
+
+        self.section(_("Meteo"))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        loc = store.data.get("weather_loc")
+        self.loc_label = label(loc.get("label", loc.get("name", "")) if isinstance(loc, dict) else _("Nessuna località"),
+                               wrap=True)
+        row.addWidget(self.loc_label, 1)
+        row.addWidget(small_button(_("Cambia località…"), _("Cerca la tua città"), main.choose_location))
         self.lay.addLayout(row)
 
         self.section(_("Mercati"))
@@ -2419,11 +2426,23 @@ class SettingsPanel(Panel):
         self.lay.addWidget(small_button(_("+ Titolo"), _("Aggiungi un titolo, un ETF, una valuta o una crypto"),
                                         main.add_market), 0, Qt.AlignLeft)
 
+        self.section(_("App predefinite"))
+        presets = {**PRESET_DEFAULTS, **store.data.get("presets", {})}
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        items = [(k, PRESETS[k]["name"]) for k in PRESETS]
+        for i, (key, name) in enumerate(items):
+            cb = QCheckBox(name)
+            cb.setChecked(bool(presets.get(key)))
+            cb.toggled.connect(lambda on, k=key: main.set_preset(k, on))
+            grid.addWidget(cb, i // 2, i % 2)
+        self.lay.addLayout(grid)
+        self.music_btns = self.segmented(_("Musica preferita"), [("", _("Nessuna"))] + [(k, v["name"]) for k, v in MUSIC.items()],
+                                         main.set_music, stacked=True)
+
         self.section(_("Altro"))
         row = QHBoxLayout()
         row.setSpacing(6)
-        row.addWidget(small_button(_("Collega Google Calendar"), _("Imposta i calendari Google"),
-                                   lambda: main.calp.configure()))
         row.addWidget(small_button(_("Cartella dati"), _("Apri la cartella dei dati"),
                                    lambda: open_url(QUrl.fromLocalFile(str(store.dir)).toString())))
         row.addStretch(1)
@@ -2620,7 +2639,7 @@ class Main(QMainWindow):
 
         # app: fisse in fondo alla finestra, sempre visibili mentre il resto scorre
         self.dock = Dock(store)
-        foot = QVBoxLayout()
+        self.foot = foot = QVBoxLayout()
         foot.setContentsMargins(0, 0, 8, 14)
         foot.addWidget(self.dock)
         outer.addLayout(foot)
@@ -2638,8 +2657,9 @@ class Main(QMainWindow):
         self.overlay.setFrameShape(QFrame.NoFrame)
         ob = QWidget()
         ob.setObjectName("overlay")
-        ol = QVBoxLayout(ob)
+        self.overlay_lay = ol = QVBoxLayout(ob)
         ol.setContentsMargins(0, 2, 8, 16)
+        ol.setSpacing(12)
         ol.addWidget(self.settings)
         ol.addStretch(1)
         self.overlay.setWidget(ob)
@@ -2933,6 +2953,12 @@ class Main(QMainWindow):
         if self.gear.isChecked() != on:
             self.gear.setChecked(on)  # richiama questa funzione tramite toggled
             return
+        # con le impostazioni aperte le app scorrono sotto di esse; chiuse, tornano fisse in fondo
+        if on:
+            self.overlay_lay.insertWidget(1, self.dock)
+        else:
+            self.foot.addWidget(self.dock)
+        self.dock.setVisible("apps" not in self.store.data.get("hidden", []))
         self.overlay.setVisible(on)
         if on:
             self.stack.setCurrentWidget(self.overlay)  # sopra la colonna
