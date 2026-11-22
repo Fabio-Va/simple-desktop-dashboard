@@ -1587,8 +1587,8 @@ class Chart(QWidget):
             else:
                 d = it_short(d)
             mi = self._mark_index()
-            hint = _("Clic: togli il segnalibro") if mi is not None and abs(i - mi) <= 1 else _("Clic: metti un segnalibro")
-            QToolTip.showText(e.globalPosition().toPoint(), f"{d}  {it_num(v)}\n{hint}", self)
+            hint = "\n" + _("Clic: togli il segnalibro") if mi is not None and abs(i - mi) <= 1 else ""
+            QToolTip.showText(e.globalPosition().toPoint(), f"{d}  {it_num(v)}{hint}", self)
 
     def leaveEvent(self, _ev):
         self.hover = None

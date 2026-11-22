@@ -102,8 +102,6 @@ TEXTS = {
     "punti": {"en": "points", "fr": "points", "es": "puntos", "zh": "点"},
     "Mercati": {"en": "Markets", "fr": "Marchés", "es": "Mercados", "zh": "市场"},
     "Oro": {"en": "Gold", "fr": "Or", "es": "Oro", "zh": "黄金"},
-    "Clic: metti un segnalibro": {"en": "Click: add a bookmark", "fr": "Clic : ajouter un repère",
-                                  "es": "Clic: poner un marcador", "zh": "单击：添加书签"},
     "Clic: togli il segnalibro": {"en": "Click: remove the bookmark", "fr": "Clic : retirer le repère",
                                   "es": "Clic: quitar el marcador", "zh": "单击：移除书签"},
     "Nomi nelle schede": {"en": "Tab labels", "fr": "Noms des onglets", "es": "Nombres de las pestañas",
