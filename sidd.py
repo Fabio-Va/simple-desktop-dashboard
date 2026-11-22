@@ -13,6 +13,7 @@ import os
 import json
 import uuid
 import random
+import shutil
 import platform
 import subprocess
 import datetime as dt
@@ -288,27 +289,65 @@ class Store:
                 self.path.write_bytes(old.read_bytes())
             except OSError:
                 pass
+        self.bak = self.path.with_suffix(".bak.json")  # copia del salvataggio precedente
         self.data = json.loads(json.dumps(self.DEFAULTS))
+        # se il file c'è ma non si riesce a leggere, non salvo mai sopra: perderei i dati veri
+        self.locked = False
         if self.path.exists():
-            try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    self.data.update(loaded)
-            except Exception:
-                backup = self.path.with_suffix(".corrotto.json")
-                try:
-                    self.path.replace(backup)
-                except OSError:
-                    pass
+            loaded = self._read(self.path)
+            if not isinstance(loaded, dict) and self.bak.exists():
+                prev = self._read(self.bak)
+                if isinstance(prev, dict):  # uso il salvataggio precedente
+                    if loaded == "corrupt":
+                        self._set_aside()
+                    loaded = prev
+            if isinstance(loaded, dict):
+                self.data.update(loaded)
+            elif loaded == "corrupt":  # file rovinato e niente copia: lo metto da parte e riparto pulito
+                self.locked = not self._set_aside()
+            else:
+                self.locked = True
         self._timer = QTimer(singleShot=True, interval=600)
         self._timer.timeout.connect(self.save_now)
+
+    def _set_aside(self):
+        try:
+            self.path.replace(self.path.with_suffix(".corrotto.json"))
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _read(path):
+        """Contenuto del file; None se non si riesce ad aprirlo, "corrupt" se non è JSON valido.
+        All'accensione del PC il file può essere bloccato per qualche istante (antivirus,
+        sincronizzazione): riprovo per una decina di secondi prima di arrendermi."""
+        import time
+        for _i in range(20):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                time.sleep(0.5)
+                continue
+            try:
+                return json.loads(text)
+            except ValueError:
+                return "corrupt"
+        return None
 
     def save(self):
         self._timer.start()
 
     def save_now(self):
+        if self.locked:
+            return
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+        if self.path.exists():
+            try:
+                shutil.copyfile(self.path, self.bak)
+            except OSError:
+                pass
         tmp.replace(self.path)
 
 
@@ -452,7 +491,7 @@ def sync_custom_markets(store):
 
 def _yahoo(symbol):
     r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/" + requests.utils.quote(symbol, safe=""),
-                     params={"range": "1y", "interval": "1d"},
+                     params={"range": "5y", "interval": "1d"},
                      headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
     r.raise_for_status()
     res = r.json()["chart"]["result"][0]
@@ -473,7 +512,7 @@ def _stooq(symbol):
     lines = r.text.strip().splitlines()
     if not lines or not lines[0].lower().startswith("date"):
         raise RuntimeError("risposta Stooq non valida")
-    cutoff = (dt.date.today() - dt.timedelta(days=380)).isoformat()
+    cutoff = (dt.date.today() - dt.timedelta(days=5 * 366 + 15)).isoformat()
     pts = []
     for ln in lines[1:]:
         p = ln.split(",")
@@ -520,7 +559,8 @@ def range_points(pts, key):
         ym = last[0][:7]
         idx = next((i for i, p in enumerate(pts) if p[0][:7] == ym), len(pts) - 1)
         return pts[max(0, idx - 1):]
-    cutoff = (dt.date.fromisoformat(last[0]) - dt.timedelta(days=365)).isoformat()
+    days = {"y1": 365, "y5": 5 * 365 + 1}.get(key, 365)
+    cutoff = (dt.date.fromisoformat(last[0]) - dt.timedelta(days=days)).isoformat()
     idx = next((i for i, p in enumerate(pts) if p[0] >= cutoff), 0)
     return pts[max(0, idx - 1):]
 
@@ -1382,6 +1422,14 @@ class Chart(QWidget):
         p.setPen(pen)
         by = y(self.pts[0][1])
         p.drawLine(QPointF(r.left(), by), QPointF(r.right(), by))
+        d0, d1 = (QDate.fromString(self.pts[i][0], "yyyy-MM-dd") for i in (0, -1))
+        # su più anni: una linea leggera all'inizio di ogni anno, con l'anno scritto sotto
+        years = []
+        if d0.daysTo(d1) > 730:
+            years = [i for i in range(1, len(self.pts)) if self.pts[i][0][:4] != self.pts[i - 1][0][:4]]
+            p.setPen(QPen(QColor(self.t["line"]), 1))
+            for i in years:
+                p.drawLine(QPointF(x(i), r.top()), QPointF(x(i), r.bottom()))
         path = QPainterPath(QPointF(x(0), y(self.pts[0][1])))
         for i, (_d, v) in enumerate(self.pts[1:], 1):
             path.lineTo(QPointF(x(i), y(v)))
@@ -1404,9 +1452,19 @@ class Chart(QWidget):
         p.setPen(muted)
         p.drawText(QPointF(r.right() + 8, y(hi) + 4), it_num(hi))
         p.drawText(QPointF(r.right() + 8, y(lo) + 4), it_num(lo))
-        p.drawText(QPointF(r.left(), self.height() - 6), it_short(self.pts[0][0]))
-        lastlab = it_short(self.pts[-1][0])
-        p.drawText(QPointF(r.right() - p.fontMetrics().horizontalAdvance(lastlab), self.height() - 6), lastlab)
+        fm = p.fontMetrics()
+        if years:  # anni centrati sulle loro linee; vicino ai bordi li sposto un po' verso l'interno
+            for i in years:
+                t = self.pts[i][0][:4]
+                w = fm.horizontalAdvance(t)
+                left = min(max(x(i) - w / 2, 0), self.width() - w)
+                p.drawText(QPointF(left, self.height() - 6), t)
+        else:
+            long_span = d0.daysTo(d1) > 300  # su un anno serve anche l'anno
+            lab = (lambda d: IT.toString(d, "MMM yyyy")) if long_span else (lambda d: IT.toString(d, "d MMM"))
+            p.drawText(QPointF(r.left(), self.height() - 6), lab(d0))
+            lastlab = lab(d1)
+            p.drawText(QPointF(r.right() - fm.horizontalAdvance(lastlab), self.height() - 6), lastlab)
         if self.hover is not None:
             i = self.hover
             p.setPen(QPen(muted, 1))
@@ -1426,7 +1484,11 @@ class Chart(QWidget):
             self.hover = i
             self.update()
             d, v = self.pts[i]
-            QToolTip.showText(e.globalPosition().toPoint(), f"{it_short(d)}  {it_num(v)}", self)
+            if self.pts[0][0][:4] != self.pts[-1][0][:4]:  # il grafico attraversa più anni: mostro anche l'anno
+                d = IT.toString(QDate.fromString(d, "yyyy-MM-dd"), "d MMM yyyy")
+            else:
+                d = it_short(d)
+            QToolTip.showText(e.globalPosition().toPoint(), f"{d}  {it_num(v)}", self)
 
     def leaveEvent(self, _ev):
         self.hover = None
@@ -1488,7 +1550,8 @@ class MarketPanel(Panel):
         cards = QHBoxLayout()
         cards.setSpacing(8)
         self.cards = {}
-        for k, title in (("d3", _("3 giorni")), ("mtd", _("Questo mese")), ("y1", _("1 anno"))):
+        for k, title in (("d3", _("3 giorni")), ("mtd", _("Questo mese")), ("y1", _("1 anno")),
+                         ("y5", _("5 anni"))):
             c = RangeCard(k, title)
             c.clicked.connect(self.select)
             cards.addWidget(c)
@@ -2949,6 +3012,10 @@ def main():
     win = Main(store)
     _windows.append(win)
     win.show()
+    if store.locked:
+        QTimer.singleShot(500, lambda: QMessageBox.warning(win, APP_NAME, _(
+            "Non riesco a leggere le tue impostazioni (il file è bloccato da un altro programma). "
+            "Per non perderle, finché non riavvii SiDD le modifiche non verranno salvate.")))
     sys.exit(app.exec())
 
 

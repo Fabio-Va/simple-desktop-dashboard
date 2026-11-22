@@ -97,6 +97,7 @@ TEXTS = {
     "3 giorni": {"en": "3 days", "fr": "3 jours", "es": "3 días", "zh": "3 天"},
     "Questo mese": {"en": "This month", "fr": "Ce mois-ci", "es": "Este mes", "zh": "本月"},
     "1 anno": {"en": "1 year", "fr": "1 an", "es": "1 año", "zh": "1 年"},
+    "5 anni": {"en": "5 years", "fr": "5 ans", "es": "5 años", "zh": "5 年"},
     "punti": {"en": "points", "fr": "points", "es": "puntos", "zh": "点"},
     "Mercati": {"en": "Markets", "fr": "Marchés", "es": "Mercados", "zh": "市场"},
     "Oro": {"en": "Gold", "fr": "Or", "es": "Oro", "zh": "黄金"},
@@ -220,6 +221,15 @@ TEXTS = {
     "Nessun task. Scrivine uno qui sopra e premi Invio.": {
         "en": "No tasks. Type one above and press Enter.", "fr": "Aucune tâche. Écrivez-en une ci-dessus et appuyez sur Entrée.",
         "es": "No hay tareas. Escribe una arriba y pulsa Intro.", "zh": "没有任务。在上方输入并按回车。"},
+    "Non riesco a leggere le tue impostazioni (il file è bloccato da un altro programma). "
+    "Per non perderle, finché non riavvii SiDD le modifiche non verranno salvate.": {
+        "en": "I can't read your settings (the file is locked by another program). To keep them safe, "
+              "changes won't be saved until you restart SiDD.",
+        "fr": "Impossible de lire vos réglages (le fichier est bloqué par un autre programme). Pour les protéger, "
+              "les modifications ne seront pas enregistrées avant le redémarrage de SiDD.",
+        "es": "No puedo leer tus ajustes (otro programa tiene el archivo bloqueado). Para no perderlos, "
+              "los cambios no se guardarán hasta que reinicies SiDD.",
+        "zh": "无法读取你的设置（文件被其他程序锁定）。为避免丢失，在重启 SiDD 之前不会保存更改。"},
     "Chiudi SiDD": {"en": "Close SiDD", "fr": "Fermer SiDD", "es": "Cerrar SiDD", "zh": "关闭 SiDD"},
     "tutti i giorni": {"en": "every day", "fr": "tous les jours", "es": "todos los días", "zh": "每天"},
     "{n} volte": {"en": "{n} times", "fr": "{n} fois", "es": "{n} veces", "zh": "{n} 次"},
