@@ -4,6 +4,7 @@ dist/
 __pycache__/
 *.pyc
 *.spec
+!sidd.spec
 SiDD.exe
 Dashboard.exe
 config.local.json

@@ -272,11 +272,11 @@ class Store:
     DEFAULTS = {"ical_urls": [], "tasks": [], "notes": [], "apps": [],
                 "on_bottom": False, "side": "right", "theme": "dark", "hidden": [],
                 "presets": {}, "music": "", "collapsed": [], "lang": "it", "markets": ["spx"],
-                "custom_markets": [], "weather_loc": None, "hotkey": "Ctrl+Alt+D"}
+                "custom_markets": [], "weather_loc": None, "hotkey": "Ctrl+Alt+D", "market_labels": "name"}
     # impostazioni (ripristinabili); il resto sono i tuoi contenuti: note, task, app, calendari,
     # località del meteo e titoli personalizzati
     SETTINGS = ("on_bottom", "side", "theme", "hidden", "presets", "music", "collapsed", "lang", "markets",
-                "hotkey")
+                "hotkey", "market_labels")
 
     def __init__(self):
         base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
@@ -483,6 +483,13 @@ MARKETS = {
     "em": ("Paesi emergenti", "EEM", None, "USD"),                 # ETF MSCI Emerging Markets
 }
 DEFAULT_MARKETS = ["spx"]
+# sigla da mostrare nelle schede (impostazione "Sigla"); i titoli personalizzati usano il loro simbolo
+TICKERS = {"spx": "SPX", "ndx": "NDX", "dji": "DJI", "ftsemib": "FTSEMIB", "btc": "BTC", "gold": "XAU",
+           "gsci": "GSCI", "world": "MXWO", "spxt": "SPXT", "china": "SHCOMP", "em": "EEM"}
+
+
+def market_ticker(key):
+    return key[2:] if key.startswith("c:") else TICKERS.get(key, key.upper())
 
 
 def sync_custom_markets(store):
@@ -1545,7 +1552,8 @@ class MarketPanel(Panel):
         self.tabs.setDocumentMode(True)
         self.tabs.setExpanding(False)
         self.tabs.setDrawBase(False)
-        self.tabs.setElideMode(Qt.ElideRight)
+        # nomi sempre interi: se le schede non ci stanno compaiono le frecce per scorrerle
+        self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.setUsesScrollButtons(True)
         self.tabs.setCursor(Qt.PointingHandCursor)
         self.tabs.currentChanged.connect(self.show_tab)
@@ -1587,9 +1595,13 @@ class MarketPanel(Panel):
         self.tabs.blockSignals(True)
         while self.tabs.count():
             self.tabs.removeTab(0)
+        symbols = self.store.data.get("market_labels") == "symbol"
         for k in keys:
-            i = self.tabs.addTab(_(MARKETS[k][0]).replace("&", "&&"))  # "&" sarebbe una scorciatoia
+            name = _(MARKETS[k][0])
+            text = market_ticker(k) if symbols else name
+            i = self.tabs.addTab(text.replace("&", "&&"))  # "&" sarebbe una scorciatoia
             self.tabs.setTabData(i, k)
+            self.tabs.setTabToolTip(i, name if symbols else market_ticker(k))
         self.tabs.setVisible(len(keys) > 1)
         self.tabs.blockSignals(False)
         self.current = keep
@@ -2425,6 +2437,8 @@ class SettingsPanel(Panel):
         self.lay.addLayout(grid)
         self.lay.addWidget(small_button(_("+ Titolo"), _("Aggiungi un titolo, un ETF, una valuta o una crypto"),
                                         main.add_market), 0, Qt.AlignLeft)
+        self.mlabel_btns = self.segmented(_("Nomi nelle schede"), [("name", _("Nome")), ("symbol", _("Sigla"))],
+                                          main.set_market_labels)
 
         self.section(_("App predefinite"))
         presets = {**PRESET_DEFAULTS, **store.data.get("presets", {})}
@@ -2499,7 +2513,8 @@ class SettingsPanel(Panel):
         for group, value in ((self.side_btns, "left" if d.get("side") == "left" else "right"),
                              (self.theme_btns, d.get("theme") if d.get("theme") in ("light", "glass") else "dark"),
                              (self.music_btns, d.get("music") if d.get("music") in MUSIC else ""),
-                             (self.lang_btns, language())):
+                             (self.lang_btns, language()),
+                             (self.mlabel_btns, "symbol" if d.get("market_labels") == "symbol" else "name")):
             for k, b in group.items():
                 b.setChecked(k == value)
 
@@ -2910,6 +2925,11 @@ class Main(QMainWindow):
             pass
         self.setWindowFlag(Qt.WindowStaysOnBottomHint, False)
         QTimer.singleShot(0, lambda: rebuild_window(self))
+
+    def set_market_labels(self, mode):
+        self.store.data["market_labels"] = mode
+        self.store.save()
+        self.market.set_markets()
 
     def set_music(self, key):
         self.store.data["music"] = key
