@@ -14,6 +14,7 @@ import json
 import uuid
 import random
 import shutil
+import bisect
 import platform
 import subprocess
 import datetime as dt
@@ -34,7 +35,7 @@ except ImportError:  # pragma: no cover
     recurring_ical_events = None
 
 from PySide6.QtCore import (Qt, QTimer, QDate, QUrl, QObject, Signal, QRunnable, QThreadPool, QPoint,
-                            QAbstractNativeEventFilter, QUrlQuery,
+                            QAbstractNativeEventFilter, QUrlQuery, QEvent,
                             QStandardPaths, QLocale, QPointF, QRectF, QSize, QFileInfo, QByteArray)
 from PySide6.QtGui import (QDesktopServices, QTextCharFormat, QColor, QPainter, QPen, QPainterPath,
                            QFont, QLinearGradient, QBrush, QIcon, QAction, QPixmap, QKeySequence,
@@ -228,6 +229,7 @@ def stylesheet(t):
     QTabBar#tabs::tab:selected {{ background:{t['surface2']}; color:{t['ink']};
         border-bottom:2px solid {t['accent']}; }}
     QTabBar QToolButton {{ background:{t['surface']}; border:none; border-radius:8px; color:{t['ink']}; }}
+    QTabBar QToolButton:disabled {{ background:transparent; }}
     QScrollArea {{ background:transparent; border:none; }}
     QScrollArea > QWidget > QWidget {{ background:transparent; }}
     QScrollArea > QWidget > QWidget#overlay {{ background:{'#F5141416' if t.get('glass') else t['bg']}; }}
@@ -503,7 +505,7 @@ def sync_custom_markets(store):
 
 def _yahoo(symbol):
     r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/" + requests.utils.quote(symbol, safe=""),
-                     params={"range": "5y", "interval": "1d"},
+                     params={"range": "10y", "interval": "1d"},
                      headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
     r.raise_for_status()
     res = r.json()["chart"]["result"][0]
@@ -524,7 +526,7 @@ def _stooq(symbol):
     lines = r.text.strip().splitlines()
     if not lines or not lines[0].lower().startswith("date"):
         raise RuntimeError("risposta Stooq non valida")
-    cutoff = (dt.date.today() - dt.timedelta(days=5 * 366 + 15)).isoformat()
+    cutoff = (dt.date.today() - dt.timedelta(days=10 * 366 + 15)).isoformat()
     pts = []
     for ln in lines[1:]:
         p = ln.split(",")
@@ -571,7 +573,7 @@ def range_points(pts, key):
         ym = last[0][:7]
         idx = next((i for i, p in enumerate(pts) if p[0][:7] == ym), len(pts) - 1)
         return pts[max(0, idx - 1):]
-    days = {"y1": 365, "y5": 5 * 365 + 1}.get(key, 365)
+    days = {"y1": 365, "y5": 5 * 365 + 1, "y10": 10 * 365 + 2}.get(key, 365)
     cutoff = (dt.date.fromisoformat(last[0]) - dt.timedelta(days=days)).isoformat()
     idx = next((i for i, p in enumerate(pts) if p[0] >= cutoff), 0)
     return pts[max(0, idx - 1):]
@@ -1390,19 +1392,77 @@ class Dock(Panel):
 
 # ---------------------------------------------------------------- grafico
 class Chart(QWidget):
+    markChanged = Signal(str)  # data del segnalibro ("" = nessuno)
+
     def __init__(self, theme):
         super().__init__()
         self.t = theme
         self.pts = []
         self.hover = None
+        self.mark = ""  # segnalibro: una data, che resta anche cambiando titolo o periodo
         self.setMinimumHeight(170)
         self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-    def set_points(self, pts):
+    def set_points(self, pts, key=""):
         self.pts = pts
+        self.key = key  # periodo scelto: decide le righe guida
         self.hover = None
         self.update()
+
+    def guides(self):
+        """Righe guida verticali (indice del punto, etichetta) a seconda del periodo:
+        5 anni -> ogni anno, 1 anno -> ogni trimestre (Q1..Q4), questo mese -> ogni settimana,
+        3 giorni -> ogni giorno."""
+        pts, key = self.pts, getattr(self, "key", "")
+        if key in ("y5", "y10"):  # su 10 anni l'anno breve (’17), se no le etichette si accavallano
+            year = (lambda d: "’" + d[2:4]) if key == "y10" else (lambda d: d[:4])
+            return [(i, year(pts[i][0])) for i in range(1, len(pts)) if pts[i][0][:4] != pts[i - 1][0][:4]]
+        if key == "y1":
+            q = lambda d: (d[:4], (int(d[5:7]) - 1) // 3 + 1)  # noqa: E731
+            return [(i, f"Q{q(pts[i][0])[1]}") for i in range(1, len(pts)) if q(pts[i][0]) != q(pts[i - 1][0])]
+        if key == "mtd":  # una riga all'inizio di ogni settimana, con la data del suo primo giorno
+            wk = lambda d: dt.date.fromisoformat(d).isocalendar()[:2]  # noqa: E731
+            return [(i, it_short(pts[i][0])) for i in range(1, len(pts)) if wk(pts[i][0]) != wk(pts[i - 1][0])]
+        if key == "d3":  # il primo punto è la chiusura di partenza; poi i 3 giorni
+            return [(i, IT.toString(QDate.fromString(pts[i][0], "yyyy-MM-dd"), "ddd d").replace(".", ""))
+                    for i in range(1, len(pts))]
+        return []
+
+    def set_mark(self, date):
+        self.mark = date or ""
+        self.update()
+
+    def _mark_index(self):
+        """Punto del grafico più vicino alla data del segnalibro (None se è fuori dal periodo)."""
+        if not self.mark or len(self.pts) < 2 or not (self.pts[0][0] <= self.mark <= self.pts[-1][0]):
+            return None
+        i = bisect.bisect_left([d for d, _v in self.pts], self.mark)
+        if i > 0 and (i == len(self.pts) or self._days(self.pts[i - 1][0], self.mark) <= self._days(self.mark, self.pts[i][0])):
+            i -= 1
+        return i
+
+    @staticmethod
+    def _days(a, b):
+        return QDate.fromString(a, "yyyy-MM-dd").daysTo(QDate.fromString(b, "yyyy-MM-dd"))
+
+    def _index_at(self, px):
+        r, _lo, _hi, _x, _y = self._geom()
+        n = len(self.pts)
+        return max(0, min(n - 1, round((px - r.left()) / (r.width() / (n - 1)))))
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton or len(self.pts) < 2:
+            return
+        _r, _lo, _hi, x, _y = self._geom()
+        mi = self._mark_index()
+        if mi is not None and abs(x(mi) - e.position().x()) <= 10:
+            self.mark = ""  # riclic sul segnalibro: lo tolgo
+        else:
+            self.mark = self.pts[self._index_at(e.position().x())][0]
+        self.update()
+        self.markChanged.emit(self.mark)
 
     def _geom(self):
         r = self.rect().adjusted(4, 12, -64, -24)
@@ -1435,14 +1495,12 @@ class Chart(QWidget):
         by = y(self.pts[0][1])
         p.drawLine(QPointF(r.left(), by), QPointF(r.right(), by))
         d0, d1 = (QDate.fromString(self.pts[i][0], "yyyy-MM-dd") for i in (0, -1))
-        # su un anno o più: una linea leggera al primo gennaio, con l'anno scritto in alto nel grafico
         long_span = d0.daysTo(d1) > 300
-        years = []
-        if long_span:
-            years = [i for i in range(1, len(self.pts)) if self.pts[i][0][:4] != self.pts[i - 1][0][:4]]
-            p.setPen(QPen(QColor(self.t["line"]), 1))
-            for i in years:
-                p.drawLine(QPointF(x(i), r.top()), QPointF(x(i), r.bottom()))
+        # righe guida leggere (anni, trimestri o giorni), con l'etichetta in alto nel grafico
+        guides = self.guides()
+        p.setPen(QPen(QColor(self.t["line"]), 1))
+        for i, _t in guides:
+            p.drawLine(QPointF(x(i), r.top()), QPointF(x(i), r.bottom()))
         path = QPainterPath(QPointF(x(0), y(self.pts[0][1])))
         for i, (_d, v) in enumerate(self.pts[1:], 1):
             path.lineTo(QPointF(x(i), y(v)))
@@ -1471,19 +1529,43 @@ class Chart(QWidget):
         p.drawText(QPointF(r.left(), self.height() - 6), lab(d0))
         lastlab = lab(d1)
         p.drawText(QPointF(r.right() - fm.horizontalAdvance(lastlab), self.height() - 6), lastlab)
-        # anni in alto, subito a destra della loro linea, su una pillola per restare leggibili sopra la curva
+        # etichette in alto, subito a destra della loro linea, su una pillola per restare leggibili sopra la curva
         pill = QColor(self.t["popup"])
         pill.setAlpha(220)
-        for i in years:
-            t = self.pts[i][0][:4]
+        for i, t in guides:
             w, h = fm.horizontalAdvance(t) + 8, fm.height() + 2
-            left = min(x(i) + 3, r.right() - w)
+            if getattr(self, "key", "") == "d3":  # giorni: centrati sul loro punto
+                left = min(max(x(i) - w / 2, r.left()), r.right() - w)
+            else:
+                left = min(x(i) + 3, r.right() - w)
             box = QRectF(left, r.top() - 6, w, h)
             p.setPen(Qt.NoPen)
             p.setBrush(pill)
             p.drawRoundedRect(box, h / 2, h / 2)
             p.setPen(muted)
             p.drawText(box, Qt.AlignCenter, t)
+        # segnalibro: linea tratteggiata, punto e pillola con data e variazione da allora a oggi
+        mi = self._mark_index()
+        if mi is not None:
+            accent = QColor(self.t["accent"])
+            mx, my = x(mi), y(self.pts[mi][1])
+            p.setPen(QPen(accent, 1.5, Qt.DashLine))
+            p.drawLine(QPointF(mx, r.top()), QPointF(mx, r.bottom()))
+            p.setPen(QPen(QColor(self.t["surface"] if not self.t.get("glass") else "#FFFFFF"), 2))
+            p.setBrush(accent)
+            p.drawEllipse(QPointF(mx, my), 5, 5)
+            ch = (self.pts[-1][1] / self.pts[mi][1] - 1) * 100 if self.pts[mi][1] else 0
+            day = QDate.fromString(self.pts[mi][0], "yyyy-MM-dd")
+            text = f"{IT.toString(day, 'd MMM yyyy')} · {'+' if ch >= 0 else '−'}{it_num(abs(ch), 1)}%"
+            w, h = fm.horizontalAdvance(text) + 12, fm.height() + 4
+            left = mx + 6 if mx + 6 + w <= r.right() else mx - 6 - w
+            left = max(r.left(), left)
+            box = QRectF(left, r.bottom() - h - 2, w, h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(accent)
+            p.drawRoundedRect(box, h / 2, h / 2)
+            p.setPen(QColor(self.t["accent_ink"]))
+            p.drawText(box, Qt.AlignCenter, text)
         if self.hover is not None:
             i = self.hover
             p.setPen(QPen(muted, 1))
@@ -1495,10 +1577,7 @@ class Chart(QWidget):
     def mouseMoveEvent(self, e):
         if len(self.pts) < 2:
             return
-        r, lo, hi, x, y = self._geom()
-        n = len(self.pts)
-        i = round((e.position().x() - r.left()) / (r.width() / (n - 1)))
-        i = max(0, min(n - 1, i))
+        i = self._index_at(e.position().x())
         if i != self.hover:
             self.hover = i
             self.update()
@@ -1507,7 +1586,9 @@ class Chart(QWidget):
                 d = IT.toString(QDate.fromString(d, "yyyy-MM-dd"), "d MMM yyyy")
             else:
                 d = it_short(d)
-            QToolTip.showText(e.globalPosition().toPoint(), f"{d}  {it_num(v)}", self)
+            mi = self._mark_index()
+            hint = _("Clic: togli il segnalibro") if mi is not None and abs(i - mi) <= 1 else _("Clic: metti un segnalibro")
+            QToolTip.showText(e.globalPosition().toPoint(), f"{d}  {it_num(v)}\n{hint}", self)
 
     def leaveEvent(self, _ev):
         self.hover = None
@@ -1557,6 +1638,12 @@ class MarketPanel(Panel):
         self.tabs.setUsesScrollButtons(True)
         self.tabs.setCursor(Qt.PointingHandCursor)
         self.tabs.currentChanged.connect(self.show_tab)
+        # agli estremi Qt disattiva la freccia: in quel caso la tolgo del tutto
+        self._arrows = {b: Qt.LeftArrow if b.objectName() == "ScrollLeftButton" else Qt.RightArrow
+                        for b in self.tabs.findChildren(QToolButton)}
+        for b in self._arrows:
+            b.installEventFilter(self)
+        self._sync_arrows()
         self.lay.addWidget(self.tabs)
         self.msg = label(_("Scarico i dati…"), "msg", wrap=True)
         self.lay.addWidget(self.msg)
@@ -1571,7 +1658,7 @@ class MarketPanel(Panel):
         cards.setSpacing(8)
         self.cards = {}
         for k, title in (("d3", _("3 giorni")), ("mtd", _("Questo mese")), ("y1", _("1 anno")),
-                         ("y5", _("5 anni"))):
+                         ("y5", _("5 anni")), ("y10", _("10 anni"))):
             c = RangeCard(k, title)
             c.clicked.connect(self.select)
             cards.addWidget(c)
@@ -1579,10 +1666,27 @@ class MarketPanel(Panel):
         self.lay.addLayout(cards)
         self.chart = Chart(theme)
         self.chart.setMinimumHeight(160)
+        self.chart.set_mark(store.data.get("market_mark", ""))
+        self.chart.markChanged.connect(self.save_mark)
         self.lay.addWidget(self.chart, 1)
         self.head.addWidget(small_button("↻", _("Aggiorna"), self.refresh))
         self.select("mtd")
         self.set_markets()
+
+    def save_mark(self, date):
+        self.store.data["market_mark"] = date
+        self.store.save()
+
+    def _sync_arrows(self):
+        for b, arrow in self._arrows.items():
+            want = arrow if b.isEnabled() else Qt.NoArrow
+            if b.arrowType() != want:
+                b.setArrowType(want)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.EnabledChange and obj in self._arrows:
+            QTimer.singleShot(0, self._sync_arrows)  # dopo che Qt ha finito di aggiornare le frecce
+        return super().eventFilter(obj, ev)
 
     def markets(self):
         keys = [k for k in self.store.data.get("markets", DEFAULT_MARKETS) if k in MARKETS]
@@ -1684,7 +1788,7 @@ class MarketPanel(Panel):
         self.key = key
         for k, c in self.cards.items():
             c.set_selected(k == key)
-        self.chart.set_points(range_points(self.pts, key))
+        self.chart.set_points(range_points(self.pts, key), key)
 
 
 # ---------------------------------------------------------------- meteo (scheda)
