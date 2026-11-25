@@ -438,6 +438,61 @@ def _to_local(x):
     return x
 
 
+def calendar_source(url):
+    """Servizio da cui viene un indirizzo iCal: ("google", id calendario) / ("outlook", host) / ("apple", "") / (None, "")."""
+    import re
+    from urllib.parse import urlparse, unquote
+    if os.path.exists(url):
+        return None, ""
+    p = urlparse(url)
+    host = (p.hostname or "").lower()
+    if host.endswith("google.com"):
+        m = re.search(r"/calendar/ical/([^/]+)/", p.path)
+        return "google", unquote(m.group(1)) if m else ""
+    if any(h in host for h in ("outlook", "office365", "office.com", "live.com")):
+        return "outlook", "outlook.office.com" if ("office" in host) else "outlook.live.com"
+    if host.endswith("icloud.com"):
+        return "apple", ""
+    return None, ""
+
+
+def event_link(source, ev, start, series=()):
+    """Indirizzo che apre l'evento (o almeno il suo giorno) nel servizio del calendario.
+    series = UID degli eventi ricorrenti: le loro occorrenze hanno un id proprio."""
+    import base64
+    kind, ref = source
+    day = start.date() if isinstance(start, dt.datetime) else start
+    if kind == "google":
+        uid = str(ev.get("UID", "") or "")
+        if uid.endswith("@google.com") and ref:
+            eid = uid[:-len("@google.com")]
+            orig = None
+            if uid in series:
+                rid = ev.get("RECURRENCE-ID")
+                orig = rid.dt if rid is not None else start
+            if isinstance(orig, dt.datetime):  # occorrenza di una serie: id_AAAAMMGGTHHMMSSZ
+                o = orig if orig.tzinfo else orig.astimezone()
+                eid += "_" + o.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            elif isinstance(orig, dt.date):
+                eid += "_" + orig.strftime("%Y%m%d")
+            short = ref.replace("@gmail.com", "@m").replace("@group.calendar.google.com", "@g")  # come fa Google
+            code = base64.urlsafe_b64encode(f"{eid} {short}".encode()).decode().rstrip("=")
+            link = "https://calendar.google.com/calendar/event?eid=" + code
+            if "@" in ref and "calendar.google.com" not in ref:  # calendario personale: apri con quell'account
+                link += "&authuser=" + ref
+            return link
+        return f"https://calendar.google.com/calendar/r/day/{day.year}/{day.month}/{day.day}"
+    if kind == "outlook":
+        mid = "/calendar/0/view/day/" if ref == "outlook.live.com" else "/calendar/view/day/"
+        return f"https://{ref}{mid}{day.year}/{day.month}/{day.day}"
+    if kind == "apple":
+        return "https://www.icloud.com/calendar/"
+    return ""
+
+
+SERVICE_NAMES = {"google": "Google Calendar", "outlook": "Outlook", "apple": "iCloud Calendar"}
+
+
 def fetch_calendar(urls):
     if Calendar is None:
         raise RuntimeError("Manca il pacchetto icalendar")
@@ -463,6 +518,9 @@ def fetch_calendar(urls):
             continue
         ok += 1
         cal_name = str(cal.get("X-WR-CALNAME", "") or "")
+        source = calendar_source(u)
+        series = {str(c.get("UID", "")) for c in cal.walk("VEVENT")
+                  if c.get("RRULE") is not None or c.get("RECURRENCE-ID") is not None}
         if recurring_ical_events is not None:
             comps = recurring_ical_events.of(cal).between(start, end)
         else:
@@ -477,6 +535,10 @@ def fetch_calendar(urls):
             de = ev.get("DTEND")
             e = _to_local(de.dt) if de is not None else None
             title = str(ev.get("SUMMARY", "") or _("(senza titolo)"))
+            try:
+                link = event_link(source, ev, s, series)
+            except Exception:  # noqa: BLE001 - senza link l'evento si vede lo stesso
+                link = ""
             if isinstance(s, dt.datetime):
                 if not isinstance(e, dt.datetime) or e < s:
                     e = s
@@ -487,7 +549,8 @@ def fetch_calendar(urls):
                 while d <= last and (d - first).days < 31:
                     if start <= d <= end:
                         days.setdefault(d.isoformat(), []).append(
-                            {"title": title, "time": label, "sort": s.strftime("%H:%M"), "cal": cal_name})
+                            {"title": title, "time": label, "sort": s.strftime("%H:%M"), "cal": cal_name,
+                             "link": link, "via": source[0]})
                     d += dt.timedelta(days=1)
             else:
                 if not isinstance(e, dt.date) or e <= s:
@@ -496,7 +559,8 @@ def fetch_calendar(urls):
                 while d < e and (d - s).days < 31:
                     if start <= d <= end:
                         days.setdefault(d.isoformat(), []).append(
-                            {"title": title, "time": "tutto il giorno", "sort": "00:00", "cal": cal_name})
+                            {"title": title, "time": "tutto il giorno", "sort": "00:00", "cal": cal_name,
+                             "link": link, "via": source[0]})
                     d += dt.timedelta(days=1)
     if ok == 0 and errors:
         raise RuntimeError(errors[0])
@@ -2102,6 +2166,11 @@ class CalendarPanel(Panel):
         self.ag_title = label("", "h3")
         self.lay.addWidget(self.ag_title)
         self.agenda = AutoList()
+        self.agenda.itemClicked.connect(self.open_event)
+        self.agenda.setMouseTracking(True)
+        self.agenda.itemEntered.connect(
+            lambda it: self.agenda.viewport().setCursor(
+                Qt.PointingHandCursor if it.data(Qt.UserRole) else Qt.ArrowCursor))
         self.lay.addWidget(self.agenda)
         self.lay.addStretch(1)
         self.update_msg()
@@ -2164,8 +2233,12 @@ class CalendarPanel(Panel):
         tasks = [t for t in self.tasks_getter() if t.get("due") == d and not t.get("done")]
         for e in evs:
             it = QListWidgetItem(f"{e['title']}\n{_(e['time'])}")
-            if e.get("cal"):
-                it.setToolTip(e["cal"])
+            tip = [e["cal"]] if e.get("cal") else []
+            if e.get("link"):
+                it.setData(Qt.UserRole, e["link"])
+                tip.append(_("Clic: apri in {app}", app=SERVICE_NAMES.get(e.get("via"), "")))
+            if tip:
+                it.setToolTip("\n".join(tip))
             self.agenda.addItem(it)
         for t in tasks:
             self.agenda.addItem(QListWidgetItem(f"{t['text']}\n{_('task')}"))
@@ -2175,6 +2248,11 @@ class CalendarPanel(Panel):
             it.setForeground(QColor(self.t["muted"]))
             self.agenda.addItem(it)
         fit_list(self.agenda)
+
+    def open_event(self, it):
+        if it.data(Qt.UserRole):
+            open_url(it.data(Qt.UserRole))
+        self.agenda.clearSelection()
 
     def new_event(self):
         open_url(gcal_template(day=self.cal.selectedDate().toString("yyyy-MM-dd")))

@@ -123,6 +123,8 @@ TEXTS = {
         "fr": "Impossible de lire l’agenda. Vérifiez la connexion et l’adresse iCal.",
         "es": "No puedo leer el calendario. Revisa la conexión y la dirección iCal.",
         "zh": "无法读取日历。请检查网络和 iCal 地址。"},
+    "Clic: apri in {app}": {"en": "Click: open in {app}", "fr": "Clic : ouvrir dans {app}",
+                            "es": "Clic: abrir en {app}", "zh": "单击：在 {app} 中打开"},
     "Clic: togli il segnalibro": {"en": "Click: remove the bookmark", "fr": "Clic : retirer le repère",
                                   "es": "Clic: quitar el marcador", "zh": "单击：移除书签"},
     "Nomi nelle schede": {"en": "Tab labels", "fr": "Noms des onglets", "es": "Nombres de las pestañas",
