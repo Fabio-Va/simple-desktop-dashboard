@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover
     recurring_ical_events = None
 
 from PySide6.QtCore import (Qt, QTimer, QDate, QUrl, QObject, Signal, QRunnable, QThreadPool, QPoint,
-                            QAbstractNativeEventFilter, QUrlQuery, QEvent,
+                            QAbstractNativeEventFilter, QUrlQuery, QEvent, QFileSystemWatcher,
                             QStandardPaths, QLocale, QPointF, QRectF, QSize, QFileInfo, QByteArray)
 from PySide6.QtGui import (QDesktopServices, QTextCharFormat, QColor, QPainter, QPen, QPainterPath,
                            QFont, QLinearGradient, QBrush, QIcon, QAction, QPixmap, QKeySequence,
@@ -311,6 +311,41 @@ class Store:
                 self.locked = True
         self._timer = QTimer(singleShot=True, interval=600)
         self._timer.timeout.connect(self.save_now)
+        # modifiche da fuori (es. le skill di Claude che scrivono note): ricarico il file
+        self.on_external = None  # funzione(tipo): "data" = data.json cambiato, "calendar" = aggiorna il calendario
+        self._own_mtime = self._mtime()
+        self._watch = QFileSystemWatcher([str(self.dir)])
+        self._watch.directoryChanged.connect(lambda _p: self._check_timer.start())
+        self._check_timer = QTimer(singleShot=True, interval=300)  # aspetto che chi scrive abbia finito
+        self._check_timer.timeout.connect(self._check_external)
+
+    def _mtime(self):
+        try:
+            return self.path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _check_external(self):
+        flag = self.dir / "aggiorna-calendario"
+        if flag.exists():
+            try:
+                flag.unlink()
+            except OSError:
+                pass
+            if self.on_external:
+                self.on_external("calendar")
+        m = self._mtime()
+        if m is None or m == self._own_mtime or self.locked:
+            return
+        loaded = self._read(self.path, tries=4)
+        if not isinstance(loaded, dict):
+            return  # ancora a metà scrittura: riprovo al prossimo cambiamento
+        self._own_mtime = m
+        self._timer.stop()  # vince la versione scritta da fuori
+        self.data = json.loads(json.dumps(self.DEFAULTS))
+        self.data.update(loaded)
+        if self.on_external:
+            self.on_external("data")
 
     def _set_aside(self):
         try:
@@ -320,16 +355,16 @@ class Store:
             return False
 
     @staticmethod
-    def _read(path):
+    def _read(path, tries=20):
         """Contenuto del file; None se non si riesce ad aprirlo, "corrupt" se non è JSON valido.
         All'accensione del PC il file può essere bloccato per qualche istante (antivirus,
         sincronizzazione): riprovo per una decina di secondi prima di arrendermi."""
         import time
-        for _i in range(20):
+        for _i in range(tries):
             try:
-                text = path.read_text(encoding="utf-8")
+                text = path.read_text(encoding="utf-8-sig")
             except OSError:
-                time.sleep(0.5)
+                time.sleep(0.5 if tries > 4 else 0.1)
                 continue
             try:
                 return json.loads(text)
@@ -351,6 +386,7 @@ class Store:
             except OSError:
                 pass
         tmp.replace(self.path)
+        self._own_mtime = self._mtime()
 
 
 # ---------------------------------------------------------------- lavori in background
@@ -761,6 +797,26 @@ def system_info():
     return f"{APP_NAME} {APP_VERSION} · {platform.platform()} · Python {platform.python_version()}"
 
 
+# ---------------------------------------------------------------- registro degli errori
+ERROR_LOG = None  # percorso di errori.log nella cartella dati (lo imposta main)
+ERROR_LOG_MAX = 200_000  # oltre questa dimensione tengo solo la seconda metà
+
+
+def log_error(source, msg):
+    """Annota un errore in errori.log (data, scheda, messaggio). Non deve mai far fallire l'app."""
+    if not ERROR_LOG:
+        return
+    line = f"{dt.datetime.now():%Y-%m-%d %H:%M:%S} [{source}] {' '.join(str(msg).split())}\n"
+    try:
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+        if ERROR_LOG.stat().st_size > ERROR_LOG_MAX:
+            text = ERROR_LOG.read_text(encoding="utf-8", errors="replace")
+            ERROR_LOG.write_text(text[len(text) // 2:].split("\n", 1)[-1], encoding="utf-8")
+    except OSError:
+        pass
+
+
 def send_bug_report(text, contact, info):
     """Invia la segnalazione al modulo configurato. Restituisce True se è partita."""
     payload = {"_subject": f"{APP_NAME} – bug report", "message": text,
@@ -848,6 +904,11 @@ class Panel(Squircle):
         self.status.hide()
         titles.addWidget(self.status)
         self.head.addLayout(titles)
+        # pallino rosso quando qualcosa non va: il dettaglio finisce nel registro errori
+        self.err_dot = QLabel("●")
+        self.err_dot.setStyleSheet(f"color:{T['down']}; font-size:11px; padding:{5 if compact else 7}px 2px 0 2px;")
+        self.err_dot.hide()
+        self.head.addWidget(self.err_dot, 0, Qt.AlignTop)
         self.head.addStretch(1)
         self.outer.addLayout(self.head)
         # contenuto della scheda: si nasconde quando la scheda è ridotta
@@ -873,6 +934,16 @@ class Panel(Squircle):
         self.status.setText(text)
         self.status.setVisible(bool(text))
 
+    def set_error(self, summary=None, detail="", log=True):
+        """Mostra (o toglie, senza argomenti) il pallino rosso e annota l'errore nel registro."""
+        if not summary:
+            self.err_dot.hide()
+            return
+        if log:
+            log_error(self.title.text() or self.objectName(), f"{summary} — {detail}" if detail else summary)
+        self.err_dot.setToolTip(summary + "\n" + _("Dettagli: ⚙ → Altro → Esporta log errori"))
+        self.err_dot.show()
+
     def enable_collapse(self, store, key):
         """Aggiunge in alto a destra il pulsante per ridurre/espandere la scheda."""
         self.store, self.collapse_key = store, key
@@ -884,9 +955,9 @@ class Panel(Squircle):
     def set_collapsed(self, on, save=True):
         self.collapsed = on
         self.body.setVisible(not on)
-        for i in range(self.head.count()):  # nasconde i pulsanti d'azione, non il titolo
+        for i in range(self.head.count()):  # nasconde i pulsanti d'azione, non il titolo né il pallino
             w = self.head.itemAt(i).widget()
-            if w is not None and w is not self.chevron:
+            if w is not None and w is not self.chevron and w is not self.err_dot:
                 w.setVisible(not on)
         m = self.outer.contentsMargins()
         self.outer.setContentsMargins(m.left(), m.top(), m.right(),
@@ -1745,9 +1816,14 @@ class MarketPanel(Panel):
             for c in self.cards.values():
                 c.val.setText("–")
             self.select(self.key)
-            self.on_err(res["error"])
+            self.msg.hide()  # il grafico dice già "Dati non disponibili"; l'errore è già nel registro
+            self.set_error(self._err_text(self.current), log=False)
         else:
             self.on_data(res)
+
+    def _err_text(self, key):
+        name = _(MARKETS[key][0]) if key in MARKETS else ""
+        return _("Non riesco a scaricare {name}. Controlla la connessione; riprovo tra 15 minuti.", name=name)
 
     def refresh(self):
         keys = self.markets()
@@ -1756,11 +1832,15 @@ class MarketPanel(Panel):
 
     def on_results(self, results):
         self.results.update(results)
+        for k, v in results.items():  # annoto ogni titolo non scaricato, anche se non è la scheda aperta
+            if "error" in v:
+                log_error(self.title.text(), f"{MARKETS[k][0] if k in MARKETS else k}: {v['error']}")
         self.show_tab()
 
     def on_data(self, res):
         self.pts = res["points"]
         self.msg.hide()
+        self.set_error()
         last = self.pts[-1]
         self.price.setText(it_num(last[1]))
         unit = MARKETS.get(self.current, (None,) * 4)[3]
@@ -1778,11 +1858,9 @@ class MarketPanel(Panel):
         self.select(self.key)
 
     def on_err(self, m):
-        name = _(MARKETS[self.current][0]) if self.current in MARKETS else ""
-        self.msg.setStyleSheet(f"color:{self.t['down']}")
-        self.msg.setText(_("Non riesco a scaricare {name}. Controlla la connessione; riprovo tra 15 minuti.",
-                           name=name) + "\n" + m[:200])
-        self.msg.show()
+        self.set_error(self._err_text(self.current), m)
+        if self.pts:
+            self.msg.hide()
 
     def select(self, key):
         self.key = key
@@ -1855,12 +1933,18 @@ class WeatherPanel(Panel):
             self.render(None)
 
     def on_err(self, m):
-        self.msg.setStyleSheet(f"color:{T['down']}")
-        self.msg.setText(_("Non riesco a scaricare il meteo. Riprovo tra 30 minuti.") + "\n" + m[:160])
-        self.msg.show()
+        self.set_error(_("Non riesco a scaricare il meteo. Riprovo tra 30 minuti."), m)
+        if self.now.isVisible():  # restano i dati dell'ultimo aggiornamento riuscito
+            self.msg.hide()
+        else:
+            self.msg.setStyleSheet("")
+            self.msg.setText(_("Meteo non disponibile al momento."))
+            self.msg.show()
 
     def render(self, j):
         has = bool(j)
+        if has:
+            self.set_error()
         self.now.setVisible(has)
         for c in self.days:
             c.setVisible(has)
@@ -2052,14 +2136,17 @@ class CalendarPanel(Panel):
         note = " (" + _("{n} calendari non raggiungibili", n=len(res["errors"])) + ")" if res["errors"] else ""
         self.title.setToolTip(_("Sincronizzato alle {time}", time=res["fetched"]) + note)
         self.msg.hide()
+        if res["errors"]:  # alcuni calendari sì, altri no
+            self.set_error(_("{n} calendari non raggiungibili", n=len(res["errors"])), " | ".join(res["errors"]))
+        else:
+            self.set_error()
         self.paint_days()
         self.render_agenda()
         self.loaded.emit(self.days)
 
     def on_err(self, m):
-        self.msg.setStyleSheet(f"color:{self.t['down']}")
-        self.msg.setText(_("Non riesco a leggere il calendario. Controlla la connessione e l’indirizzo iCal (⚙ → <b>Collega Google Calendar</b>). Dettaglio: ") + m[:160])
-        self.msg.show()
+        self.set_error(_("Non riesco a leggere il calendario. Controlla la connessione e l’indirizzo iCal."), m)
+        self.update_msg()
 
     def paint_days(self):
         marks = {d: {"ev"} for d in self.days}
@@ -2577,6 +2664,8 @@ class SettingsPanel(Panel):
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(small_button(_("Segnala un bug"), _("Scrivi cosa non funziona"), main.report_bug))
+        row.addWidget(small_button(_("Esporta log errori"), _("Salva in un file gli errori registrati"),
+                                   main.export_log))
         row.addStretch(1)
         self.lay.addLayout(row)
         quit_ = small_button(_("Chiudi la dashboard"), _("Chiude il programma"), main.close)
@@ -2940,6 +3029,27 @@ class Main(QMainWindow):
                                                   "più una lettera, un numero o un tasto F, e non deve essere già "
                                                   "usata da un altro programma."))
 
+    # ---- registro errori
+    def export_log(self):
+        text = ""
+        try:
+            text = ERROR_LOG.read_text(encoding="utf-8", errors="replace") if ERROR_LOG else ""
+        except OSError:
+            pass
+        if not text.strip():
+            QMessageBox.information(self, APP_NAME, _("Nessun errore registrato."))
+            return
+        docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        name = f"{APP_NAME}-errori-{dt.date.today():%Y-%m-%d}.txt"
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta log errori"), str(Path(docs) / name),
+                                               _("File di testo") + " (*.txt)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(system_info() + "\n\n" + text, encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(self, APP_NAME, _("Non riesco a salvare il file.") + f"\n{e}")
+
     # ---- segnalazione bug
     def report_bug(self):
         dlg = BugDialog(self)
@@ -3150,8 +3260,9 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("")
-    global T
+    global T, ERROR_LOG
     store = Store()
+    ERROR_LOG = store.dir / "errori.log"
     T = theme_for(store)
     apply_language(store)
     sync_custom_markets(store)
@@ -3162,6 +3273,16 @@ def main():
     win = Main(store)
     _windows.append(win)
     win.show()
+
+    def external(kind):
+        w = _windows[-1] if _windows else None
+        if w is None:
+            return
+        if kind == "calendar":
+            w.calp.refresh()
+        else:  # data.json cambiato da fuori: ricostruisco la finestra con i dati nuovi
+            QTimer.singleShot(0, lambda: rebuild_window(w))
+    store.on_external = external
     if store.locked:
         QTimer.singleShot(500, lambda: QMessageBox.warning(win, APP_NAME, _(
             "Non riesco a leggere le tue impostazioni (il file è bloccato da un altro programma). "
