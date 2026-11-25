@@ -17,7 +17,10 @@ notes, calendar, tasks, the weather, the markets and your favourite apps one gla
   - a brighter top and a thin shadow on the bottom edge give the panes thickness
 - Every card can be **collapsed** with its chevron, or **hidden** from the settings; the state is remembered
 - Optional "stay on the desktop, below other windows" mode
-- Starts with Windows (optional) and minimizes with the – button
+- Starts with Windows (optional), minimizes with the – button and closes with ✕
+- Settings open **over the column**; the app dock stays pinned at the bottom
+- Errors (no connection, data not available) show as a small **red dot** next to the card title instead of filling the card; settings → "Export error log" saves the details
+- If another program changes `data.json` (for example a script editing the notes), SiDD reloads it instead of overwriting it
 - **Global keyboard shortcut** to show or hide the sidebar (default Ctrl+Alt+D, change it or turn it off in the settings)
 - **Report a bug** from the settings: write what went wrong and send it (or open a pre-filled GitHub issue)
 - **Updates**: at start-up (and every 12 hours) SiDD checks the latest GitHub release; when there is a newer one an "Update to x.y" button appears, downloads the new `SiDD.exe`, swaps it in and restarts. You can also check by hand from the settings
@@ -34,6 +37,7 @@ notes, calendar, tasks, the weather, the markets and your favourite apps one gla
 - Compact month view: the current month stands out, days of other months are faded, today is a filled circle
 - Dots under the days with **events** (blue) and **tasks due** (orange)
 - Agenda of the selected day; + opens Google Calendar to create an event
+- **Click an event** to open it where it lives: the event itself in Google Calendar, that day in Outlook, or iCloud Calendar
 - The mouse wheel scrolls the sidebar, never the month
 - Today's date is shown under the title
 
@@ -41,28 +45,32 @@ notes, calendar, tasks, the weather, the markets and your favourite apps one gla
 - Quick add with an optional **due date**; overdue tasks turn red, due tasks show in the calendar too
 - Tick to complete, "Clear" removes completed tasks
 - Right-click to edit, send to Google Calendar or delete
+- **This week** tab: the calendar events from Monday to Sunday; events with the same name are grouped ("Mon/Wed/Fri · 15:00", "5 times", "every day")
 
 ### Weather
 - Current conditions, feels-like temperature, wind, humidity and a **6-day forecast**
 - Search your city in the settings; data from [Open-Meteo](https://open-meteo.com) (free, no API key), refreshed every 30 minutes
 
 ### Markets
-- Pick one or more of six instruments in the settings: **S&P 500, Nasdaq 100, Dow Jones, FTSE MIB, Bitcoin, Gold**
+- Pick one or more instruments in the settings: **S&P 500, Nasdaq 100, Dow Jones, FTSE MIB, Bitcoin, Gold, commodities (S&P GSCI), MSCI World, S&P 500 ex-tech, China (Shanghai), emerging markets**
 - **Add your own**: any Yahoo Finance symbol (stocks such as `AAPL` or `ENI.MI`, ETFs, currencies such as `EURUSD=X`, crypto such as `ETH-USD`), shown in its own currency
-- With more than one, the card shows **browser-style tabs** to switch between them
-- Value and change over **3 days, this month and 1 year**; click a range to change the chart
+- With more than one, the card shows **browser-style tabs**, labelled with the full name or the symbol; they scroll when they don't fit
+- Value and change over **3 days, this month, 1 year, 5 years and 10 years**; click a range to change the chart
+- Guide lines for each range (days, weeks, quarters, years) and the dates at both ends
+- **Click the chart to set a bookmark** on a date: it stays there when you switch instrument or range and shows the change since then; click again to remove it
 - Data from Yahoo Finance with Stooq as fallback, refreshed every 15 minutes
 
 ![Markets](docs/screenshot-markets.png)
 
 ### App launcher
 - One-click tiles for **programs, files and links** (also URI schemes such as `spotify:` or `steam://`), with their system icons
+- Links to well-known sites (about 160: LinkedIn, Gmail, GitHub, YouTube, Netflix, Amazon…) get the **brand colour** of the site
 - Tiles align to the right when the sidebar is docked right
 - Press the ⚙ gear to enter **configuration mode**: add programs or links, right-click a tile to move, rename or remove it
 - Built-in apps you can switch on in the settings:
   - **Epic Pen**
   - **Windows screenshot** (Snipping Tool)
-  - **Favourite music app**: VLC, iTunes or Spotify
+  - **Favourite music app**: VLC, iTunes or Spotify (with its logo)
   - your own apps through `config.local.json` (see below), also tiles that open a small **menu of choices** (for example several profiles or versions of the same program)
 
 ### Privacy

@@ -24,6 +24,7 @@ import requests
 
 from i18n import _, LANGUAGES, QT_LOCALES, set_language, language
 import glass
+from brands import brand_for
 
 try:
     from icalendar import Calendar
@@ -48,7 +49,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabe
                                QDialogButtonBox, QStackedLayout)
 
 APP_NAME = "SiDD"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.9.0"
 # Aggiornamenti automatici: solo la build ufficiale li riceve. Il file official.py (non su git)
 # esiste solo sul PC di chi pubblica le release; chi compila la propria versione modificata non
 # riceve aggiornamenti che la sovrascriverebbero, a meno di indicare il proprio repository con
@@ -139,8 +140,26 @@ class Squircle(QFrame):
             p.drawPath(path)
 
 
-def squircle_tile(size, bg, icon=None, letter=None, ink="#FFFFFF"):
-    """Icona quadrata con angoli squircle, come quelle di iOS/macOS."""
+def draw_spotify(p, size, ink="#000000"):
+    """Le tre onde del logo Spotify, da disegnare sul verde."""
+    pen = QPen(QColor(ink))
+    pen.setCapStyle(Qt.RoundCap)
+    p.setBrush(Qt.NoBrush)
+    cx = size * 0.5
+    for hw, y, w in ((0.31, 0.38, 0.088), (0.26, 0.535, 0.072), (0.21, 0.675, 0.058)):
+        pen.setWidthF(size * w)
+        p.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(cx - hw * size, y * size)
+        path.quadTo(cx, (y - hw * 0.42) * size, cx + hw * size * 0.98, (y + hw * 0.1) * size)
+        p.drawPath(path)
+
+
+DRAWINGS = {"spotify": draw_spotify}
+
+
+def squircle_tile(size, bg, icon=None, letter=None, ink="#FFFFFF", draw=None):
+    """Icona quadrata con angoli squircle, come quelle di iOS/macOS. draw = disegno di un logo (DRAWINGS)."""
     dpr = QGuiApplication.primaryScreen().devicePixelRatio() if QGuiApplication.primaryScreen() else 1.0
     pm = QPixmap(int(size * dpr), int(size * dpr))
     pm.setDevicePixelRatio(dpr)
@@ -150,7 +169,9 @@ def squircle_tile(size, bg, icon=None, letter=None, ink="#FFFFFF"):
     p.setRenderHint(QPainter.SmoothPixmapTransform)
     path = squircle_path(QRectF(0, 0, size, size), size * 0.36, n=5)
     p.fillPath(path, QColor(bg))
-    if icon is not None:
+    if draw in DRAWINGS:
+        DRAWINGS[draw](p, size)
+    elif icon is not None:
         s = size * 0.62
         src = icon.pixmap(QSize(int(s * dpr), int(s * dpr)))
         p.drawPixmap(QRectF((size - s) / 2, (size - s) / 2, s, s), src, QRectF(src.rect()))
@@ -1279,7 +1300,7 @@ MUSIC = {
     "itunes": {"name": "iTunes", "color": "#FA2D48", "glyph": "♪",
                "candidates": [r"%ProgramFiles%\iTunes\iTunes.exe",
                               r"shell:AppsFolder\AppleInc.iTunes_nzyj5cx40ttqa!iTunes"]},
-    "spotify": {"name": "Spotify", "color": "#1DB954", "glyph": "♫",
+    "spotify": {"name": "Spotify", "color": "#1ED760", "glyph": "♫", "draw": "spotify",
                 "candidates": [r"%APPDATA%\Spotify\Spotify.exe", "spotify:"]},
 }
 
@@ -1418,7 +1439,8 @@ class Dock(Panel):
                 b.clicked.connect(lambda _c=False, n=p["name"]: QMessageBox.information(
                     self, APP_NAME, _("Non trovo {name} su questo computer.", name=n)))
             else:
-                b = self._tile(p["name"], _("Apri {name}", name=p["name"]), squircle_tile(TILE, p["color"], letter=p["glyph"]))
+                b = self._tile(p["name"], _("Apri {name}", name=p["name"]),
+                               squircle_tile(TILE, p["color"], letter=p["glyph"], draw=p.get("draw")))
                 b.clicked.connect(lambda _c=False, t=target: self.run(t))
             out.append(b)
         return out
@@ -1446,6 +1468,8 @@ class Dock(Panel):
             path = os.path.expanduser(a["target"])
             if not is_link(a["target"]) and os.path.exists(path):
                 icon = squircle_tile(TILE, T["surface2"], icon=self.icons.icon(QFileInfo(path)))
+            elif brand := brand_for(a["target"]):  # sito noto: il colore del suo marchio
+                icon = squircle_tile(TILE, brand[0], letter=name[:1].upper(), ink=brand[1], draw=brand[2])
             else:
                 icon = squircle_tile(TILE, ICON_BG[sum(map(ord, name)) % len(ICON_BG)], letter=name[:1].upper())
             b = self._tile(name, _("Apri {name}", name=name) + f"\n{a['target']}", icon)
